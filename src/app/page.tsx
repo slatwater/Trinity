@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { ProjectCard } from "@/components/ProjectCard";
+import { WorkflowMonitor } from "@/components/WorkflowMonitor";
 import { Project } from "@/lib/types";
 
 export default function Home() {
@@ -109,6 +110,8 @@ export default function Home() {
             ))}
           </div>
         )}
+
+        <WorkflowMonitor projects={projects} />
       </main>
     </div>
   );

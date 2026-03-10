@@ -16,7 +16,8 @@ defmodule Trinity.ClaudeSession do
     :current_prompt,
     current_response: "",
     queue: [],
-    messages: []
+    messages: [],
+    workflow_stages: []
   ]
 
   # Public API
@@ -44,6 +45,13 @@ defmodule Trinity.ClaudeSession do
     end
   end
 
+  def get_workflow(project_id) do
+    case Registry.lookup(Trinity.SessionRegistry, project_id) do
+      [{_pid, _}] -> GenServer.call(via(project_id), :get_workflow)
+      [] -> nil
+    end
+  end
+
   def stop(project_id) do
     case Registry.lookup(Trinity.SessionRegistry, project_id) do
       [{pid, _}] -> DynamicSupervisor.terminate_child(Trinity.SessionManager, pid)
@@ -62,6 +70,8 @@ defmodule Trinity.ClaudeSession do
     Logger.info("[ClaudeSession] Starting session for #{project_id} at #{project_path}")
 
     case ClaudeAgentSDK.Streaming.start_session(%ClaudeAgentSDK.Options{
+           model: "opus",
+           effort: :high,
            system_prompt: %{type: :preset, preset: :claude_code},
            permission_mode: :bypass_permissions,
            cwd: project_path,
@@ -109,6 +119,17 @@ defmodule Trinity.ClaudeSession do
     {:reply, {all_msgs, state.status}, state}
   end
 
+  def handle_call(:get_workflow, _from, state) do
+    workflow = %{
+      project_id: state.project_id,
+      status: to_string(state.status),
+      stages: Enum.map(state.workflow_stages, fn s ->
+        %{name: s.name, status: to_string(s.status)}
+      end)
+    }
+    {:reply, workflow, state}
+  end
+
   @impl true
   def handle_info({:accumulate_text, text}, state) do
     {:noreply, %{state | current_response: state.current_response <> text}}
@@ -124,7 +145,8 @@ defmodule Trinity.ClaudeSession do
           %{role: "assistant", content: state.current_response}
         ]
 
-    state = %{state | status: :idle, task_ref: nil, messages: messages, current_prompt: nil, current_response: ""}
+    stages = finalize_stages(state.workflow_stages)
+    state = %{state | status: :idle, task_ref: nil, messages: messages, current_prompt: nil, current_response: "", workflow_stages: stages}
     state = drain_queue(state)
     {:noreply, state}
   end
@@ -143,9 +165,21 @@ defmodule Trinity.ClaudeSession do
         state.messages
       end
 
-    state = %{state | status: :idle, task_ref: nil, messages: messages, current_prompt: nil, current_response: ""}
+    stages = finalize_stages(state.workflow_stages)
+    state = %{state | status: :idle, task_ref: nil, messages: messages, current_prompt: nil, current_response: "", workflow_stages: stages}
     state = drain_queue(state)
     {:noreply, state}
+  end
+
+  def handle_info({:stage_event, :text}, state) do
+    stages = maybe_add_text_stage(state.workflow_stages)
+    {:noreply, %{state | workflow_stages: stages}}
+  end
+
+  def handle_info({:stage_event, {:tool, tool_name}}, state) do
+    label = Trinity.StageMapper.tool_to_stage(tool_name)
+    stages = add_tool_stage(state.workflow_stages, label)
+    {:noreply, %{state | workflow_stages: stages}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -180,6 +214,9 @@ defmodule Trinity.ClaudeSession do
               case sse_event do
                 %{type: "text", content: text} ->
                   send(genserver_pid, {:accumulate_text, text})
+                  send(genserver_pid, {:stage_event, :text})
+                %{type: "tool_use", tool: tool} ->
+                  send(genserver_pid, {:stage_event, {:tool, tool}})
                 _ -> :ok
               end
             end
@@ -205,7 +242,45 @@ defmodule Trinity.ClaudeSession do
 
     GenServer.reply(from, {:ok, topic})
 
-    %{state | status: :busy, task_ref: task.ref, current_prompt: prompt, current_response: ""}
+    %{state | status: :busy, task_ref: task.ref, current_prompt: prompt, current_response: "", workflow_stages: []}
+  end
+
+  defp maybe_add_text_stage([]) do
+    [%{name: "Thinking", status: :active}]
+  end
+
+  defp maybe_add_text_stage(stages) do
+    case List.last(stages) do
+      %{name: "Thinking", status: :active} -> stages
+      _ ->
+        # Only show Thinking at the start; skip between tool uses
+        has_tools = Enum.any?(stages, fn s -> s.name != "Thinking" end)
+        if has_tools do
+          stages
+        else
+          completed = Enum.map(stages, &%{&1 | status: :completed})
+          completed ++ [%{name: "Thinking", status: :active}]
+        end
+    end
+  end
+
+  defp add_tool_stage(stages, label) do
+    completed = Enum.map(stages, &%{&1 | status: :completed})
+    # Collapse same-name stages (don't repeat "Editing Files" etc.)
+    if Enum.any?(completed, fn s -> s.name == label end) do
+      # Re-activate the existing one visually by keeping list clean
+      completed
+      |> Enum.map(fn s ->
+        if s.name == label, do: %{s | status: :active}, else: s
+      end)
+    else
+      completed ++ [%{name: label, status: :active}]
+    end
+  end
+
+  defp finalize_stages(stages) do
+    completed = Enum.map(stages, &%{&1 | status: :completed})
+    completed ++ [%{name: "Done", status: :completed}]
   end
 
   defp drain_queue(%{queue: []} = state), do: state

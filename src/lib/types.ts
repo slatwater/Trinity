@@ -16,3 +16,14 @@ export interface Message {
   timestamp: string;
   isStreaming?: boolean;
 }
+
+export interface WorkflowStage {
+  name: string;
+  status: "completed" | "active";
+}
+
+export interface ProjectWorkflow {
+  project_id: string;
+  status: "busy" | "idle";
+  stages: WorkflowStage[];
+}

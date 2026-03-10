@@ -12,5 +12,6 @@ defmodule TrinityWeb.Router do
     get "/session", SessionController, :show
     delete "/session", SessionController, :delete
     get "/messages", SessionController, :messages
+    get "/workflows", SessionController, :workflows
   end
 end

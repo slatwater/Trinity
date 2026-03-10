@@ -26,4 +26,18 @@ defmodule TrinityWeb.SessionController do
   def messages(conn, _params) do
     json(conn, %{messages: [], status: "idle"})
   end
+
+  def workflows(conn, _params) do
+    sessions = Registry.select(Trinity.SessionRegistry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+
+    workflows =
+      sessions
+      |> Enum.map(fn {project_id, _pid} ->
+        Trinity.ClaudeSession.get_workflow(project_id)
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.filter(fn w -> w.status == "busy" or length(w.stages) > 0 end)
+
+    json(conn, %{workflows: workflows})
+  end
 end
