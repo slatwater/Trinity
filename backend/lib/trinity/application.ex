@@ -8,7 +8,9 @@ defmodule Trinity.Application do
       TrinityWeb.Telemetry,
       {Phoenix.PubSub, name: Trinity.PubSub},
       {Registry, keys: :unique, name: Trinity.SessionRegistry},
+      {Registry, keys: :unique, name: Trinity.AutoPilotRegistry},
       {DynamicSupervisor, name: Trinity.SessionManager, strategy: :one_for_one},
+      {DynamicSupervisor, name: Trinity.AutoPilotManager, strategy: :one_for_one},
       TrinityWeb.Endpoint
     ]
 

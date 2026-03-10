@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { ProjectCard } from "@/components/ProjectCard";
 import { WorkflowMonitor } from "@/components/WorkflowMonitor";
+import { AutoPilotModal } from "@/components/AutoPilotModal";
+import { AutoPilotPanel } from "@/components/AutoPilotPanel";
 import { Project } from "@/lib/types";
 
 export default function Home() {
@@ -11,6 +13,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
   const [statuses, setStatuses] = useState<Record<string, "busy" | "idle">>({});
+  const [showModal, setShowModal] = useState(false);
+  const [autopilotId, setAutopilotId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/projects")
@@ -64,18 +68,27 @@ export default function Home() {
               {workspace}
             </p>
           </div>
-          <input
-            type="text"
-            placeholder="Filter projects..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="px-4 py-2 rounded-lg text-sm outline-none w-64"
-            style={{
-              background: "var(--bg-secondary)",
-              color: "var(--text-primary)",
-              border: "1px solid var(--border)",
-            }}
-          />
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowModal(true)}
+              className="px-4 py-2 rounded-lg text-sm font-medium"
+              style={{ background: "var(--accent)", color: "#fff" }}
+            >
+              Auto Pilot
+            </button>
+            <input
+              type="text"
+              placeholder="Filter projects..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="px-4 py-2 rounded-lg text-sm outline-none w-64"
+              style={{
+                background: "var(--bg-secondary)",
+                color: "var(--text-primary)",
+                border: "1px solid var(--border)",
+              }}
+            />
+          </div>
         </div>
       </header>
 
@@ -112,7 +125,25 @@ export default function Home() {
         )}
 
         <WorkflowMonitor projects={projects} />
+
+        {autopilotId && (
+          <AutoPilotPanel
+            autopilotId={autopilotId}
+            onClose={() => setAutopilotId(null)}
+          />
+        )}
       </main>
+
+      {showModal && (
+        <AutoPilotModal
+          projects={projects}
+          onClose={() => setShowModal(false)}
+          onStart={(id) => {
+            setShowModal(false);
+            setAutopilotId(id);
+          }}
+        />
+      )}
     </div>
   );
 }

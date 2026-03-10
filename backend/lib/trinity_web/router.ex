@@ -13,5 +13,11 @@ defmodule TrinityWeb.Router do
     delete "/session", SessionController, :delete
     get "/messages", SessionController, :messages
     get "/workflows", SessionController, :workflows
+
+    post "/autopilot", AutoPilotController, :create
+    get "/autopilot/:id", AutoPilotController, :show
+    post "/autopilot/:id/message", AutoPilotController, :message
+    post "/autopilot/:id/confirm", AutoPilotController, :confirm
+    delete "/autopilot/:id", AutoPilotController, :delete
   end
 end
