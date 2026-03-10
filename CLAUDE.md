@@ -2,44 +2,57 @@
 
 Claude Code 本地开发流程可视化客户端。
 
-## 技术栈
+## 架构
 
-- Next.js 15 (App Router) + TypeScript + Tailwind CSS v4
-- Zustand 状态管理 + localStorage 持久化
-- Claude CLI (`claude --print - --output-format stream-json --verbose`) 交互
-- SSE 流式传输，stdout pipe 实时读取
-- 多轮上下文：`--resume` 串联 session
-- 无人值守：`--permission-mode bypassPermissions`
+- **前端**: Next.js 15 (App Router) + TypeScript + Tailwind CSS v4 + Zustand
+- **后端**: Elixir/Phoenix API (port 4000) + ClaudeAgentSDK
+- Next.js 通过 `next.config.ts` rewrites 代理 `/api/chat` 和 `/api/session` 到 Elixir 后端
+- 每个项目一个持久化 Claude 进程（GenServer），多轮对话共享上下文
+- 点击 "New Chat" 才会终止进程并重建
 
 ## 开发命令
 
 ```bash
-npm run dev    # 开发服务器 localhost:3000（自动清除 CLAUDECODE 环境变量）
-npm run build  # 生产构建
-npm run lint   # ESLint
+# 前端
+cd /Users/sevenstars/Projects/trinity
+npm run dev          # localhost:3000
+
+# 后端
+cd backend
+mix deps.get
+mix phx.server       # localhost:4000
+
+# 或用 start.sh 同时启动两者
 ```
 
 ## 工程索引
 
 ```
-src/
+src/                              # Next.js 前端
 ├── app/
-│   ├── page.tsx              # 首页 - 项目仪表盘
-│   ├── project/[id]/page.tsx # 项目聊天页
-│   └── api/
-│       ├── projects/route.ts # 扫描本地项目
-│       ├── chat/route.ts     # 聊天 SSE 流
-│       └── session/route.ts  # 会话管理（重置）
+│   ├── page.tsx                  # 首页 - 项目仪表盘
+│   ├── project/[id]/page.tsx     # 项目聊天页（含进程状态指示器）
+│   └── api/projects/route.ts     # 扫描本地项目（唯一保留的 Node API）
 ├── components/
-│   ├── ProjectCard.tsx       # 项目卡片
-│   ├── ChatWindow.tsx        # 聊天窗口
-│   └── MessageBubble.tsx     # 消息气泡
+│   ├── ProjectCard.tsx           # 项目卡片
+│   ├── ChatWindow.tsx            # 聊天窗口（SSE 消费端）
+│   └── MessageBubble.tsx         # 消息气泡
 ├── lib/
-│   ├── claude.ts             # Claude CLI 封装（--print - 模式）
-│   ├── projects.ts           # 项目扫描器
-│   └── types.ts              # 类型定义
+│   ├── projects.ts               # 项目扫描器
+│   └── types.ts                  # 类型定义
 └── stores/
-    └── chat.ts               # Zustand 状态 + localStorage 持久化
+    └── chat.ts                   # Zustand 状态 + localStorage 持久化
+
+backend/                          # Elixir/Phoenix 后端
+├── lib/trinity/
+│   ├── application.ex            # 监督树（Registry + DynamicSupervisor）
+│   ├── claude_session.ex         # GenServer：持久化 Claude 进程管理
+│   └── stream_event_parser.ex    # SDK 事件 → 前端 JSON 映射
+└── lib/trinity_web/
+    ├── controllers/
+    │   ├── chat_controller.ex    # POST /api/chat → SSE 流式响应
+    │   └── session_controller.ex # GET/DELETE /api/session
+    └── router.ex                 # API 路由
 ```
 
 ## 环境变量
@@ -48,11 +61,13 @@ src/
 
 ## 代码规范
 
-- 组件用 "use client" 标记客户端组件
-- API routes 使用 Next.js Route Handlers
+- 前端组件用 "use client" 标记
 - CSS 变量定义在 globals.css，不用 Tailwind 颜色
+- Elixir 后端纯 API，无 HTML/LiveView
 
-## CLI 调用方式
+## 关键设计决策
 
-关键发现：`claude -p "prompt"` 在 pipe 模式下 hang，`claude --print -` 从 stdin 传 prompt 正常工作。
-启动时通过 `start.sh` 清除 `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT` 避免嵌套检测。
+- Claude 进程通过 Elixir ClaudeAgentSDK 管理（`Streaming.start_session/send_message/close_session`）
+- SSE 流通过 Phoenix.PubSub 广播 → ChatController chunked response 消费
+- `--permission-mode bypassPermissions` 无人值守模式
+- 启动时通过 `start.sh` 清除 `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT` 避免嵌套检测

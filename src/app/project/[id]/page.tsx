@@ -13,6 +13,7 @@ export default function ProjectPage() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
+  const [processAlive, setProcessAlive] = useState(false);
 
   useEffect(() => {
     fetch("/api/projects")
@@ -22,6 +23,20 @@ export default function ProjectPage() {
         setProject(found || null);
       })
       .finally(() => setLoading(false));
+  }, [projectId]);
+
+  // Poll process status
+  useEffect(() => {
+    if (!projectId) return;
+    const check = () => {
+      fetch(`/api/session?id=${encodeURIComponent(projectId)}`)
+        .then((r) => r.json())
+        .then((d) => setProcessAlive(d.alive))
+        .catch(() => setProcessAlive(false));
+    };
+    check();
+    const interval = setInterval(check, 3000);
+    return () => clearInterval(interval);
   }, [projectId]);
 
   if (loading) {
@@ -64,13 +79,20 @@ export default function ProjectPage() {
           >
             &larr; Back
           </button>
-          <div>
-            <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-              {project.name}
-            </h2>
-            <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-              {project.path}
-            </p>
+          <div className="flex items-center gap-2">
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ background: processAlive ? "#22c55e" : "var(--border)" }}
+              title={processAlive ? "Process running" : "No active process"}
+            />
+            <div>
+              <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                {project.name}
+              </h2>
+              <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                {project.path}
+              </p>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-3">
