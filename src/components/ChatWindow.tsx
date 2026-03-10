@@ -1,0 +1,234 @@
+"use client";
+
+import { useState, useRef, useEffect, useCallback } from "react";
+import { useChatStore } from "@/stores/chat";
+import { MessageBubble } from "./MessageBubble";
+import { Project, Message } from "@/lib/types";
+
+export function ChatWindow({ project }: { project: Project }) {
+  const [input, setInput] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const { sessions, isLoading, addMessage, appendToLastMessage, setLoading } = useChatStore();
+
+  const messages = sessions[project.id] || [];
+  const loading = isLoading[project.id] || false;
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [project.id]);
+
+  const sendMessage = async () => {
+    const prompt = input.trim();
+    if (!prompt || loading) return;
+
+    setInput("");
+
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: prompt,
+      timestamp: new Date().toISOString(),
+    };
+    addMessage(project.id, userMsg);
+
+    const assistantMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: "",
+      timestamp: new Date().toISOString(),
+      isStreaming: true,
+    };
+    addMessage(project.id, assistantMsg);
+    setLoading(project.id, true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectPath: project.path,
+          prompt,
+          sessionId: crypto.randomUUID(),
+        }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) throw new Error("No reader");
+
+      let done = false;
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+
+        if (value) {
+          const text = decoder.decode(value, { stream: true });
+          const lines = text.split("\n");
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6);
+            try {
+              const data = JSON.parse(jsonStr);
+              if (data.type === "done") break;
+              if (data.type === "error") {
+                appendToLastMessage(project.id, `\n[Error: ${data.content}]`);
+                break;
+              }
+              if (data.content) {
+                appendToLastMessage(project.id, data.content);
+              }
+            } catch { /* skip malformed */ }
+          }
+        }
+      }
+    } catch (error) {
+      appendToLastMessage(project.id, `\n[Connection error: ${error}]`);
+    } finally {
+      setLoading(project.id, false);
+      // Remove streaming indicator from last message
+      useChatStore.setState((state) => {
+        const msgs = state.sessions[project.id] || [];
+        if (msgs.length === 0) return state;
+        const last = msgs[msgs.length - 1];
+        return {
+          sessions: {
+            ...state.sessions,
+            [project.id]: [...msgs.slice(0, -1), { ...last, isStreaming: false }],
+          },
+        };
+      });
+    }
+  };
+
+  const sendTask = async () => {
+    const prompt = input.trim();
+    if (!prompt || loading) return;
+
+    setInput("");
+
+    const userMsg: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: `[Task] ${prompt}`,
+      timestamp: new Date().toISOString(),
+    };
+    addMessage(project.id, userMsg);
+
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: project.path, prompt }),
+      });
+      const data = await res.json();
+
+      const sysMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "system",
+        content: `Task submitted (${data.task.id.slice(0, 8)}). Running in background...`,
+        timestamp: new Date().toISOString(),
+      };
+      addMessage(project.id, sysMsg);
+    } catch (error) {
+      const errMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "system",
+        content: `Failed to create task: ${error}`,
+        timestamp: new Date().toISOString(),
+      };
+      addMessage(project.id, errMsg);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+    if (e.key === "Enter" && e.metaKey) {
+      e.preventDefault();
+      sendTask();
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {messages.length === 0 && (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center" style={{ color: "var(--text-secondary)" }}>
+              <div className="text-4xl mb-4 opacity-20">{">"}_</div>
+              <p className="text-sm">Send a message to start chatting with Claude</p>
+              <p className="text-xs mt-2 opacity-60">
+                Working in: {project.path}
+              </p>
+            </div>
+          </div>
+        )}
+        {messages.map((msg) => (
+          <MessageBubble key={msg.id} message={msg} />
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="p-4 border-t" style={{ borderColor: "var(--border)" }}>
+        <div className="flex gap-2">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Send a message... (Enter to send, ⌘+Enter to send as background task)"
+            rows={3}
+            className="flex-1 resize-none rounded-lg px-4 py-3 text-sm outline-none placeholder:opacity-40"
+            style={{
+              background: "var(--bg-tertiary)",
+              color: "var(--text-primary)",
+              border: "1px solid var(--border)",
+            }}
+            onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
+            onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
+          />
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={sendMessage}
+              disabled={loading || !input.trim()}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-30"
+              style={{ background: "var(--accent)", color: "#fff" }}
+            >
+              {loading ? "..." : "Send"}
+            </button>
+            <button
+              onClick={sendTask}
+              disabled={loading || !input.trim()}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-30"
+              style={{
+                background: "transparent",
+                color: "var(--accent)",
+                border: "1px solid var(--accent)",
+              }}
+            >
+              Task
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
