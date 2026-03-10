@@ -12,16 +12,22 @@ defmodule TrinityWeb.ChatController do
         topic = "session:#{session_id}"
         Phoenix.PubSub.subscribe(Trinity.PubSub, topic)
 
-        # Tell session to process the message
-        {:ok, ^topic} = Trinity.ClaudeSession.send_message(session_id, prompt)
+        # Tell session to process the message (handle dead GenServer)
+        case safe_send_message(session_id, project_path, prompt) do
+          {:ok, ^topic} ->
+            conn
+            |> put_resp_content_type("text/event-stream")
+            |> put_resp_header("cache-control", "no-cache")
+            |> put_resp_header("connection", "keep-alive")
+            |> send_chunked(200)
+            |> stream_loop(session_id)
 
-        # Stream SSE response
-        conn
-        |> put_resp_content_type("text/event-stream")
-        |> put_resp_header("cache-control", "no-cache")
-        |> put_resp_header("connection", "keep-alive")
-        |> send_chunked(200)
-        |> stream_loop(session_id)
+          {:error, reason} ->
+            Phoenix.PubSub.unsubscribe(Trinity.PubSub, topic)
+            conn
+            |> put_status(500)
+            |> json(%{error: "Session error: #{inspect(reason)}"})
+        end
 
       {:error, reason} ->
         conn
@@ -54,6 +60,38 @@ defmodule TrinityWeb.ChatController do
         chunk(conn, "data: #{Jason.encode!(%{type: "done"})}\n\n")
         conn
     end
+  end
+
+  defp safe_send_message(session_id, project_path, prompt) do
+    try do
+      Trinity.ClaudeSession.send_message(session_id, prompt)
+    catch
+      :exit, {:noproc, _} ->
+        # GenServer died, restart and retry
+        Logger.warning("[ChatController] Session dead, restarting for #{session_id}")
+        case restart_session(session_id, project_path) do
+          {:ok, _pid} ->
+            try do
+              Trinity.ClaudeSession.send_message(session_id, prompt)
+            catch
+              :exit, reason -> {:error, reason}
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      :exit, reason ->
+        {:error, reason}
+    end
+  end
+
+  defp restart_session(session_id, project_path) do
+    Trinity.ClaudeSession.stop(session_id)
+    DynamicSupervisor.start_child(
+      Trinity.SessionManager,
+      {Trinity.ClaudeSession, {session_id, project_path, []}}
+    )
   end
 
   defp ensure_session(session_id, project_path) do

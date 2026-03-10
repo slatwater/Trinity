@@ -6,8 +6,9 @@ Claude Code 本地开发流程可视化客户端。
 
 - **前端**: Next.js 15 (App Router) + TypeScript + Tailwind CSS v4 + Zustand
 - **后端**: Elixir/Phoenix API (port 4000) + ClaudeAgentSDK
-- Next.js 通过 `next.config.ts` rewrites 代理 `/api/chat` 和 `/api/session` 到 Elixir 后端
+- Next.js 通过 `next.config.ts` rewrites 代理 `/api/chat`、`/api/session`、`/api/messages` 到 Elixir 后端
 - 每个项目一个持久化 Claude 进程（GenServer），多轮对话共享上下文
+- GenServer 实时累积响应文本，退出页面不丢失对话内容
 - 点击 "New Chat" 才会终止进程并重建
 
 ## 开发命令
@@ -35,13 +36,13 @@ src/                              # Next.js 前端
 │   └── api/projects/route.ts     # 扫描本地项目（唯一保留的 Node API）
 ├── components/
 │   ├── ProjectCard.tsx           # 项目卡片
-│   ├── ChatWindow.tsx            # 聊天窗口（SSE 消费端）
+│   ├── ChatWindow.tsx            # 聊天窗口（SSE + 后端轮询）
 │   └── MessageBubble.tsx         # 消息气泡
 ├── lib/
 │   ├── projects.ts               # 项目扫描器
 │   └── types.ts                  # 类型定义
 └── stores/
-    └── chat.ts                   # Zustand 状态 + localStorage 持久化
+    └── chat.ts                   # Zustand 状态管理
 
 backend/                          # Elixir/Phoenix 后端
 ├── lib/trinity/
@@ -51,7 +52,7 @@ backend/                          # Elixir/Phoenix 后端
 └── lib/trinity_web/
     ├── controllers/
     │   ├── chat_controller.ex    # POST /api/chat → SSE 流式响应
-    │   └── session_controller.ex # GET/DELETE /api/session
+    │   └── session_controller.ex # GET/DELETE /api/session + GET /api/messages
     └── router.ex                 # API 路由
 ```
 
@@ -69,5 +70,9 @@ backend/                          # Elixir/Phoenix 后端
 
 - Claude 进程通过 Elixir ClaudeAgentSDK 管理（`Streaming.start_session/send_message/close_session`）
 - SSE 流通过 Phoenix.PubSub 广播 → ChatController chunked response 消费
+- GenServer 实时累积文本（`{:accumulate_text, text}`），断连不丢数据
+- 前端通过 `GET /api/messages` 轮询后端，自动恢复断连期间的完整响应
+- ChatController 自动重启崩溃的 GenServer（`safe_send_message`）
+- `system_prompt: %{type: :preset, preset: :claude_code}` 保留 Claude Code 默认行为
 - `--permission-mode bypassPermissions` 无人值守模式
 - 启动时通过 `start.sh` 清除 `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT` 避免嵌套检测

@@ -9,16 +9,72 @@ export function ChatWindow({ project }: { project: Project }) {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const { sessions, isLoading, addMessage, appendToLastMessage, setLoading, hydrate } = useChatStore();
+  const { sessions, isLoading, addMessage, appendToLastMessage, setLoading } = useChatStore();
 
   const messages = sessions[project.id] || [];
   const loading = isLoading[project.id] || false;
 
-  // Hydrate from localStorage on mount
+  // Fetch messages from backend and apply to store
+  const fetchAndApply = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/messages?id=${project.id}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const backendMsgs: { role: string; content: string }[] = data.messages || [];
+      const status: string = data.status || "idle";
+
+      if (backendMsgs.length > 0) {
+        useChatStore.setState((state) => {
+          const newMsgs: Message[] = backendMsgs.map((m, i) => ({
+            id: `msg-${i}`,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            timestamp: new Date().toISOString(),
+            isStreaming: status === "busy" && i === backendMsgs.length - 1 && m.role === "assistant",
+          }));
+          const sessions = { ...state.sessions, [project.id]: newMsgs };
+          return { sessions };
+        });
+      }
+
+      return status;
+    } catch {
+      return null;
+    }
+  }, [project.id]);
+
+  // On mount: fetch backend messages, poll if busy
   useEffect(() => {
-    hydrate();
-  }, [hydrate]);
+    let cancelled = false;
+
+    const init = async () => {
+      const status = await fetchAndApply();
+
+      if (status === "busy" && !cancelled) {
+        // Task is running, poll for updates
+        pollRef.current = setInterval(async () => {
+          const s = await fetchAndApply();
+          if (s !== "busy" && pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+        }, 2000);
+      }
+    };
+
+    init();
+
+    return () => {
+      cancelled = true;
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [project.id, fetchAndApply]);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -31,6 +87,13 @@ export function ChatWindow({ project }: { project: Project }) {
   useEffect(() => {
     inputRef.current?.focus();
   }, [project.id]);
+
+  // Abort fetch on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const sendMessage = async () => {
     const prompt = input.trim();
@@ -56,6 +119,9 @@ export function ChatWindow({ project }: { project: Project }) {
     addMessage(project.id, assistantMsg);
     setLoading(project.id, true);
 
+    const abortController = new AbortController();
+    abortRef.current = abortController;
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -65,6 +131,7 @@ export function ChatWindow({ project }: { project: Project }) {
           prompt,
           sessionId: project.id,
         }),
+        signal: abortController.signal,
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -100,11 +167,12 @@ export function ChatWindow({ project }: { project: Project }) {
           }
         }
       }
-    } catch (error) {
-      appendToLastMessage(project.id, `\n[Connection error: ${error}]`);
+    } catch {
+      // SSE disconnected — backend continues, poll will pick up the result
     } finally {
+      abortRef.current = null;
       setLoading(project.id, false);
-      // Remove streaming indicator from last message
+      // Remove streaming indicator
       useChatStore.setState((state) => {
         const msgs = state.sessions[project.id] || [];
         if (msgs.length === 0) return state;
@@ -116,6 +184,16 @@ export function ChatWindow({ project }: { project: Project }) {
           },
         };
       });
+
+      // Start polling to get complete response from backend
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(async () => {
+        const s = await fetchAndApply();
+        if (s !== "busy" && pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      }, 2000);
     }
   };
 

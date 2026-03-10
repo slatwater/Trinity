@@ -17,4 +17,13 @@ defmodule TrinityWeb.SessionController do
   def delete(conn, _params) do
     json(conn, %{ok: true})
   end
+
+  def messages(conn, %{"id" => id}) do
+    {messages, status} = Trinity.ClaudeSession.get_messages(id)
+    json(conn, %{messages: messages, status: to_string(status)})
+  end
+
+  def messages(conn, _params) do
+    json(conn, %{messages: [], status: "idle"})
+  end
 end

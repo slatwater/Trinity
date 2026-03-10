@@ -11,5 +11,6 @@ defmodule TrinityWeb.Router do
     post "/chat", ChatController, :create
     get "/session", SessionController, :show
     delete "/session", SessionController, :delete
+    get "/messages", SessionController, :messages
   end
 end
