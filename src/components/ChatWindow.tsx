@@ -10,10 +10,15 @@ export function ChatWindow({ project }: { project: Project }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const { sessions, isLoading, addMessage, appendToLastMessage, setLoading } = useChatStore();
+  const { sessions, isLoading, addMessage, appendToLastMessage, setLoading, hydrate } = useChatStore();
 
   const messages = sessions[project.id] || [];
   const loading = isLoading[project.id] || false;
+
+  // Hydrate from localStorage on mount
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -58,7 +63,7 @@ export function ChatWindow({ project }: { project: Project }) {
         body: JSON.stringify({
           projectPath: project.path,
           prompt,
-          sessionId: crypto.randomUUID(),
+          sessionId: project.id,
         }),
       });
 
@@ -114,54 +119,10 @@ export function ChatWindow({ project }: { project: Project }) {
     }
   };
 
-  const sendTask = async () => {
-    const prompt = input.trim();
-    if (!prompt || loading) return;
-
-    setInput("");
-
-    const userMsg: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: `[Task] ${prompt}`,
-      timestamp: new Date().toISOString(),
-    };
-    addMessage(project.id, userMsg);
-
-    try {
-      const res = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath: project.path, prompt }),
-      });
-      const data = await res.json();
-
-      const sysMsg: Message = {
-        id: crypto.randomUUID(),
-        role: "system",
-        content: `Task submitted (${data.task.id.slice(0, 8)}). Running in background...`,
-        timestamp: new Date().toISOString(),
-      };
-      addMessage(project.id, sysMsg);
-    } catch (error) {
-      const errMsg: Message = {
-        id: crypto.randomUUID(),
-        role: "system",
-        content: `Failed to create task: ${error}`,
-        timestamp: new Date().toISOString(),
-      };
-      addMessage(project.id, errMsg);
-    }
-  };
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
-    }
-    if (e.key === "Enter" && e.metaKey) {
-      e.preventDefault();
-      sendTask();
     }
   };
 
@@ -194,7 +155,7 @@ export function ChatWindow({ project }: { project: Project }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Send a message... (Enter to send, ⌘+Enter to send as background task)"
+            placeholder="Send a message... (Enter to send, Shift+Enter for newline)"
             rows={3}
             className="flex-1 resize-none rounded-lg px-4 py-3 text-sm outline-none placeholder:opacity-40"
             style={{
@@ -205,28 +166,14 @@ export function ChatWindow({ project }: { project: Project }) {
             onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
             onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
           />
-          <div className="flex flex-col gap-2">
-            <button
-              onClick={sendMessage}
-              disabled={loading || !input.trim()}
-              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-30"
-              style={{ background: "var(--accent)", color: "#fff" }}
-            >
-              {loading ? "..." : "Send"}
-            </button>
-            <button
-              onClick={sendTask}
-              disabled={loading || !input.trim()}
-              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-30"
-              style={{
-                background: "transparent",
-                color: "var(--accent)",
-                border: "1px solid var(--accent)",
-              }}
-            >
-              Task
-            </button>
-          </div>
+          <button
+            onClick={sendMessage}
+            disabled={loading || !input.trim()}
+            className="self-end px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-30"
+            style={{ background: "var(--accent)", color: "#fff" }}
+          >
+            {loading ? "..." : "Send"}
+          </button>
         </div>
       </div>
     </div>
