@@ -9,7 +9,7 @@ defmodule Trinity.StreamEventParser do
   end
 
   def to_sse(%{type: :tool_use_start, name: name}) do
-    %{type: "tool_use", content: "", tool: name}
+    %{type: "tool_use", tool: name}
   end
 
   def to_sse(%{type: :error, error: reason}) do

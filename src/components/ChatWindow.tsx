@@ -7,6 +7,7 @@ import { Project, Message } from "@/lib/types";
 
 export function ChatWindow({ project }: { project: Project }) {
   const [input, setInput] = useState("");
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -155,12 +156,19 @@ export function ChatWindow({ project }: { project: Project }) {
             const jsonStr = line.slice(6);
             try {
               const data = JSON.parse(jsonStr);
-              if (data.type === "done") break;
+              if (data.type === "done") {
+                setActiveTool(null);
+                break;
+              }
               if (data.type === "error") {
+                setActiveTool(null);
                 appendToLastMessage(project.id, `\n[Error: ${data.content}]`);
                 break;
               }
-              if (data.content) {
+              if (data.type === "tool_use" && data.tool) {
+                setActiveTool(data.tool);
+              } else if (data.content) {
+                setActiveTool(null);
                 appendToLastMessage(project.id, data.content);
               }
             } catch { /* skip malformed */ }
@@ -171,6 +179,7 @@ export function ChatWindow({ project }: { project: Project }) {
       // SSE disconnected — backend continues, poll will pick up the result
     } finally {
       abortRef.current = null;
+      setActiveTool(null);
       setLoading(project.id, false);
       // Remove streaming indicator
       useChatStore.setState((state) => {
@@ -222,6 +231,13 @@ export function ChatWindow({ project }: { project: Project }) {
         {messages.map((msg) => (
           <MessageBubble key={msg.id} message={msg} />
         ))}
+        {activeTool && (
+          <div className="flex items-center gap-2 px-4 py-2 mb-2 rounded-lg text-xs"
+            style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}>
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--accent)" }} />
+            {activeTool}
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 

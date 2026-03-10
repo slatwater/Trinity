@@ -17,9 +17,11 @@ const langColors: Record<string, string> = {
 
 export function ProjectCard({
   project,
+  status = "idle",
   onClick,
 }: {
   project: Project;
+  status?: "busy" | "idle";
   onClick: () => void;
 }) {
   const timeAgo = getTimeAgo(project.lastModified);
@@ -54,6 +56,16 @@ export function ProjectCard({
           {project.hasClaude && (
             <span className="text-xs px-2 py-0.5 rounded" style={{ background: "rgba(99,102,241,0.15)", color: "var(--accent)" }}>
               claude
+            </span>
+          )}
+          {status === "busy" ? (
+            <span className="text-xs px-2 py-0.5 rounded flex items-center gap-1" style={{ background: "rgba(34,197,94,0.15)", color: "#22c55e" }}>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "#22c55e" }} />
+              running
+            </span>
+          ) : (
+            <span className="text-xs px-2 py-0.5 rounded" style={{ background: "var(--bg-primary)", color: "var(--text-secondary)" }}>
+              idle
             </span>
           )}
         </div>

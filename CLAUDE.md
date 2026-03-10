@@ -35,8 +35,8 @@ src/                              # Next.js 前端
 │   ├── project/[id]/page.tsx     # 项目聊天页（含进程状态指示器）
 │   └── api/projects/route.ts     # 扫描本地项目（唯一保留的 Node API）
 ├── components/
-│   ├── ProjectCard.tsx           # 项目卡片
-│   ├── ChatWindow.tsx            # 聊天窗口（SSE + 后端轮询）
+│   ├── ProjectCard.tsx           # 项目卡片（含 running/idle 状态徽标）
+│   ├── ChatWindow.tsx            # 聊天窗口（SSE + 后端轮询 + 工具活动指示器）
 │   └── MessageBubble.tsx         # 消息气泡
 ├── lib/
 │   ├── projects.ts               # 项目扫描器
@@ -76,3 +76,5 @@ backend/                          # Elixir/Phoenix 后端
 - `system_prompt: %{type: :preset, preset: :claude_code}` 保留 Claude Code 默认行为
 - `--permission-mode bypassPermissions` 无人值守模式
 - 启动时通过 `start.sh` 清除 `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT` 避免嵌套检测
+- 仪表盘每 5 秒轮询各项目状态，显示 running/idle 徽标
+- 聊天窗口实时显示工具活动指示器（Read/Edit/Bash 等），不污染消息内容

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ProjectCard } from "@/components/ProjectCard";
 import { Project } from "@/lib/types";
 
@@ -9,6 +9,7 @@ export default function Home() {
   const [workspace, setWorkspace] = useState("");
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
+  const [statuses, setStatuses] = useState<Record<string, "busy" | "idle">>({});
 
   useEffect(() => {
     fetch("/api/projects")
@@ -19,6 +20,29 @@ export default function Home() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  const pollStatuses = useCallback(async (projectList: Project[]) => {
+    const entries = await Promise.all(
+      projectList.map(async (p) => {
+        try {
+          const res = await fetch(`/api/messages?id=${p.id}`);
+          if (!res.ok) return [p.id, "idle"] as const;
+          const data = await res.json();
+          return [p.id, data.status === "busy" ? "busy" : "idle"] as const;
+        } catch {
+          return [p.id, "idle"] as const;
+        }
+      })
+    );
+    setStatuses(Object.fromEntries(entries));
+  }, []);
+
+  useEffect(() => {
+    if (projects.length === 0) return;
+    pollStatuses(projects);
+    const interval = setInterval(() => pollStatuses(projects), 5000);
+    return () => clearInterval(interval);
+  }, [projects, pollStatuses]);
 
   const filtered = projects.filter(
     (p) =>
@@ -77,6 +101,7 @@ export default function Home() {
               <ProjectCard
                 key={project.id}
                 project={project}
+                status={statuses[project.id] || "idle"}
                 onClick={() => {
                   window.location.href = `/project/${project.id}`;
                 }}
