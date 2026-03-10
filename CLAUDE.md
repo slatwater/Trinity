@@ -70,15 +70,9 @@ backend/                          # Elixir/Phoenix 后端
 
 ## 关键设计决策
 
-- Claude 进程通过 Elixir ClaudeAgentSDK 管理（`Streaming.start_session/send_message/close_session`）
-- SSE 流通过 Phoenix.PubSub 广播 → ChatController chunked response 消费
-- GenServer 实时累积文本（`{:accumulate_text, text}`），断连不丢数据
-- 前端通过 `GET /api/messages` 轮询后端，自动恢复断连期间的完整响应
-- ChatController 自动重启崩溃的 GenServer（`safe_send_message`）
-- `system_prompt: %{type: :preset, preset: :claude_code}` 保留 Claude Code 默认行为
-- `--permission-mode bypassPermissions` 无人值守模式
+- ClaudeAgentSDK 管理进程，`model: "opus"` + `effort: :high` + `preset: :claude_code` + `bypassPermissions`
+- SSE 流通过 PubSub 广播，GenServer 实时累积文本，断连不丢数据，前端轮询自动恢复
+- ChatController `safe_send_message` 自动重启崩溃的 GenServer
 - 启动时通过 `start.sh` 清除 `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT` 避免嵌套检测
-- 仪表盘每 5 秒轮询各项目状态，显示 running/idle 徽标
-- 聊天窗口实时显示工具活动指示器（Read/Edit/Bash 等），不污染消息内容
+- 仪表盘轮询项目状态（running/idle），聊天窗口显示工具活动指示器
 - 工作流可视化：GenServer 追踪阶段事件，去重折叠，`/api/workflows` 批量查询
-- 默认使用 `model: "opus"` + `effort: :high`，与本地 Claude Code 行为一致
