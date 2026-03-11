@@ -1,7 +1,8 @@
-import { app, BrowserWindow, screen } from "electron";
+import { app, BrowserWindow, screen, utilityProcess } from "electron";
 import { spawn, execSync, ChildProcess } from "child_process";
 import path from "path";
 import http from "http";
+import type { UtilityProcess } from "electron";
 
 const isDev = !app.isPackaged;
 
@@ -30,7 +31,7 @@ const shellEnv = loadShellEnv();
 
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess | null = null;
-let frontendProcess: ChildProcess | null = null;
+let frontendProcess: UtilityProcess | ChildProcess | null = null;
 
 const BACKEND_PORT = 4000;
 const FRONTEND_PORT = 3000;
@@ -90,7 +91,7 @@ function startBackend(): ChildProcess {
   });
 }
 
-function startFrontend(): ChildProcess {
+function startFrontend(): UtilityProcess | ChildProcess {
   if (isDev) {
     return spawn("npx", ["next", "dev"], {
       cwd: path.join(__dirname, "..", ".."),
@@ -99,16 +100,18 @@ function startFrontend(): ChildProcess {
     });
   }
 
+  // Use utilityProcess.fork() instead of spawn(process.execPath) to prevent
+  // a second "exec" Dock icon on macOS (spawn creates a foreground process)
   const serverJs = resourcePath("standalone", "server.js");
-  return spawn(process.execPath, [serverJs], {
+  return utilityProcess.fork(serverJs, [], {
     env: {
       ...shellEnv,
-      ELECTRON_RUN_AS_NODE: "1",
       PORT: String(FRONTEND_PORT),
       HOSTNAME: "localhost",
     },
     cwd: resourcePath("standalone"),
-    stdio: ["ignore", "pipe", "pipe"],
+    serviceName: "trinity-frontend",
+    stdio: "pipe",
   });
 }
 
@@ -140,7 +143,10 @@ function createWindow() {
   });
 }
 
-function pipeOutput(proc: ChildProcess, label: string) {
+function pipeOutput(
+  proc: ChildProcess | UtilityProcess,
+  label: string
+) {
   proc.stdout?.on("data", (d: Buffer) =>
     process.stdout.write(`[${label}] ${d}`)
   );
@@ -150,7 +156,7 @@ function pipeOutput(proc: ChildProcess, label: string) {
 }
 
 function cleanup() {
-  if (frontendProcess && !frontendProcess.killed) {
+  if (frontendProcess) {
     frontendProcess.kill();
     frontendProcess = null;
   }
@@ -181,7 +187,7 @@ async function startup() {
   backendProcess.on("exit", (code) => {
     console.log(`Backend exited with code ${code}`);
   });
-  frontendProcess.on("exit", (code) => {
+  (frontendProcess as ChildProcess).on("exit", (code: number) => {
     console.log(`Frontend exited with code ${code}`);
   });
 

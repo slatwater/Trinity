@@ -76,4 +76,4 @@ electron/
 - ClaudeAgentSDK：`model: "opus"` + `effort: :high` + `preset: :claude_code` + `bypassPermissions`
 - SSE 流通过 PubSub 广播，每次请求唯一 topic 防止事件串线
 - Auto Pilot：Task 异步 + wait_for_idle，CI 轮询 + 失败自动修复，通过后合并+打 tag
-- Electron：hiddenInset 标题栏，CSS `.drag`/`.no-drag`，Elixir release + Next.js standalone 内嵌
+- Electron：hiddenInset 标题栏，CSS `.drag`/`.no-drag`，Elixir release + Next.js standalone（utilityProcess）内嵌
