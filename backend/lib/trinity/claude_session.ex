@@ -27,8 +27,8 @@ defmodule Trinity.ClaudeSession do
     GenServer.start_link(__MODULE__, {project_id, project_path, opts}, name: name)
   end
 
-  def send_message(project_id, prompt) do
-    GenServer.call(via(project_id), {:send_message, prompt}, :infinity)
+  def send_message(project_id, prompt, reply_topic \\ nil) do
+    GenServer.call(via(project_id), {:send_message, prompt, reply_topic}, :infinity)
   end
 
   def alive?(project_id) do
@@ -94,13 +94,13 @@ defmodule Trinity.ClaudeSession do
   end
 
   @impl true
-  def handle_call({:send_message, prompt}, from, %{status: :idle} = state) do
-    state = dispatch_message(prompt, from, state)
+  def handle_call({:send_message, prompt, reply_topic}, from, %{status: :idle} = state) do
+    state = dispatch_message(prompt, from, reply_topic, state)
     {:noreply, state}
   end
 
-  def handle_call({:send_message, prompt}, from, %{status: :busy} = state) do
-    {:noreply, %{state | queue: state.queue ++ [{prompt, from}]}}
+  def handle_call({:send_message, prompt, reply_topic}, from, %{status: :busy} = state) do
+    {:noreply, %{state | queue: state.queue ++ [{prompt, from, reply_topic}]}}
   end
 
   def handle_call(:get_messages, _from, state) do
@@ -124,7 +124,8 @@ defmodule Trinity.ClaudeSession do
       project_id: state.project_id,
       status: to_string(state.status),
       stages: Enum.map(state.workflow_stages, fn s ->
-        %{name: s.name, status: to_string(s.status)}
+        stage = %{name: s.name, status: to_string(s.status)}
+        if s[:count] && s[:count] > 1, do: Map.put(stage, :count, s.count), else: stage
       end)
     }
     {:reply, workflow, state}
@@ -195,8 +196,8 @@ defmodule Trinity.ClaudeSession do
 
   # Internals
 
-  defp dispatch_message(prompt, from, state) do
-    topic = "session:#{state.project_id}"
+  defp dispatch_message(prompt, from, reply_topic, state) do
+    topic = reply_topic || "session:#{state.project_id}"
     sdk_session = state.sdk_session
     genserver_pid = self()
 
@@ -266,15 +267,17 @@ defmodule Trinity.ClaudeSession do
 
   defp add_tool_stage(stages, label) do
     completed = Enum.map(stages, &%{&1 | status: :completed})
-    # Collapse same-name stages (don't repeat "Editing Files" etc.)
     if Enum.any?(completed, fn s -> s.name == label end) do
-      # Re-activate the existing one visually by keeping list clean
       completed
       |> Enum.map(fn s ->
-        if s.name == label, do: %{s | status: :active}, else: s
+        if s.name == label do
+          %{s | status: :active, count: Map.get(s, :count, 1) + 1}
+        else
+          s
+        end
       end)
     else
-      completed ++ [%{name: label, status: :active}]
+      completed ++ [%{name: label, status: :active, count: 1}]
     end
   end
 
@@ -285,8 +288,8 @@ defmodule Trinity.ClaudeSession do
 
   defp drain_queue(%{queue: []} = state), do: state
 
-  defp drain_queue(%{queue: [{prompt, from} | rest]} = state) do
+  defp drain_queue(%{queue: [{prompt, from, reply_topic} | rest]} = state) do
     state = %{state | queue: rest}
-    dispatch_message(prompt, from, state)
+    dispatch_message(prompt, from, reply_topic, state)
   end
 end

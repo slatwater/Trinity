@@ -8,19 +8,20 @@ defmodule TrinityWeb.ChatController do
     # Ensure session exists
     case ensure_session(session_id, project_path) do
       {:ok, _pid} ->
-        # Subscribe to session events
-        topic = "session:#{session_id}"
+        # Unique topic per request to prevent event leaking between requests
+        msg_ref = Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false)
+        topic = "session:#{session_id}:#{msg_ref}"
         Phoenix.PubSub.subscribe(Trinity.PubSub, topic)
 
         # Tell session to process the message (handle dead GenServer)
-        case safe_send_message(session_id, project_path, prompt) do
+        case safe_send_message(session_id, project_path, prompt, topic) do
           {:ok, ^topic} ->
             conn
             |> put_resp_content_type("text/event-stream")
             |> put_resp_header("cache-control", "no-cache")
             |> put_resp_header("connection", "keep-alive")
             |> send_chunked(200)
-            |> stream_loop(session_id)
+            |> stream_loop(topic)
 
           {:error, reason} ->
             Phoenix.PubSub.unsubscribe(Trinity.PubSub, topic)
@@ -42,16 +43,16 @@ defmodule TrinityWeb.ChatController do
     |> json(%{error: "Missing projectPath or prompt"})
   end
 
-  defp stream_loop(conn, session_id) do
+  defp stream_loop(conn, topic) do
     receive do
       {:stream_event, %{type: "done"} = event} ->
         chunk(conn, "data: #{Jason.encode!(event)}\n\n")
-        Phoenix.PubSub.unsubscribe(Trinity.PubSub, "session:#{session_id}")
+        Phoenix.PubSub.unsubscribe(Trinity.PubSub, topic)
         conn
 
       {:stream_event, event} ->
         case chunk(conn, "data: #{Jason.encode!(event)}\n\n") do
-          {:ok, conn} -> stream_loop(conn, session_id)
+          {:ok, conn} -> stream_loop(conn, topic)
           {:error, _} -> conn
         end
     after
@@ -62,9 +63,9 @@ defmodule TrinityWeb.ChatController do
     end
   end
 
-  defp safe_send_message(session_id, project_path, prompt) do
+  defp safe_send_message(session_id, project_path, prompt, topic) do
     try do
-      Trinity.ClaudeSession.send_message(session_id, prompt)
+      Trinity.ClaudeSession.send_message(session_id, prompt, topic)
     catch
       :exit, {:noproc, _} ->
         # GenServer died, restart and retry
@@ -72,7 +73,7 @@ defmodule TrinityWeb.ChatController do
         case restart_session(session_id, project_path) do
           {:ok, _pid} ->
             try do
-              Trinity.ClaudeSession.send_message(session_id, prompt)
+              Trinity.ClaudeSession.send_message(session_id, prompt, topic)
             catch
               :exit, reason -> {:error, reason}
             end

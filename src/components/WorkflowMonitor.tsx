@@ -107,6 +107,9 @@ function StageNode({ stage }: { stage: WorkflowStage }) {
         />
       )}
       {stage.name}
+      {stage.count && stage.count > 1 && (
+        <span style={{ opacity: 0.6 }}>&times;{stage.count}</span>
+      )}
     </span>
   );
 }

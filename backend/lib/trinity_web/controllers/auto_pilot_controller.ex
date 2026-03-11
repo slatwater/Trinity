@@ -39,7 +39,8 @@ defmodule TrinityWeb.AutoPilotController do
       conn |> put_status(404) |> json(%{error: "Not found"})
     else
       {agent_a_id, _, _} = Trinity.AutoPilot.get_agent_ids(id)
-      topic = "session:#{agent_a_id}"
+      msg_ref = Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false)
+      topic = "session:#{agent_a_id}:#{msg_ref}"
       Phoenix.PubSub.subscribe(Trinity.PubSub, topic)
 
       # During clarification, wrap user message with constraint reminder
@@ -52,7 +53,7 @@ defmodule TrinityWeb.AutoPilotController do
             content
         end
 
-      case safe_send(agent_a_id, prompt) do
+      case safe_send(agent_a_id, prompt, topic) do
         {:ok, ^topic} ->
           conn
           |> put_resp_content_type("text/event-stream")
@@ -110,9 +111,9 @@ defmodule TrinityWeb.AutoPilotController do
     end
   end
 
-  defp safe_send(session_id, prompt) do
+  defp safe_send(session_id, prompt, topic) do
     try do
-      Trinity.ClaudeSession.send_message(session_id, prompt)
+      Trinity.ClaudeSession.send_message(session_id, prompt, topic)
     catch
       :exit, reason -> {:error, reason}
     end

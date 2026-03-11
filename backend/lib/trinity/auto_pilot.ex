@@ -2,7 +2,7 @@ defmodule Trinity.AutoPilot do
   @moduledoc """
   Orchestrator GenServer for the Auto Pilot feature.
   Manages two Claude agents (A: requirements/spec/code, B: tests)
-  through a state machine: clarifying → generating_spec → writing_tests → waiting_merge → writing_code → done
+  through a state machine: clarifying → generating_spec → writing_tests → waiting_merge → writing_code → waiting_ci → (fixing →)* merging → done
   """
   use GenServer, restart: :temporary
   require Logger
@@ -167,17 +167,23 @@ defmodule Trinity.AutoPilot do
     case start_session(state.agent_b_id, state.project_path) do
       {:ok, _pid} ->
         test_prompt = """
-        你是测试 Agent。根据以下功能规格写测试：
+        你是测试 Agent。根据以下功能规格更新测试：
 
         #{spec}
 
+        严格规则：
+        - 禁止新建测试文件，只能修改项目中已有的测试文件
+        - 先查看项目现有的测试目录结构和测试文件，了解测试框架和风格
+        - 在最合适的已有测试文件中添加或修改测试用例
+        - 如果项目还没有测试文件，只允许创建一个测试文件
+        - 所有新增测试标记为 skip/pending
+
         执行步骤：
         1. 创建 test/#{state.branch_name} 分支
-        2. 编写测试文件，所有测试标记为 skip/pending
-        3. 如有 CI workflow 文件则更新
-        4. git push 并用 gh pr create 创建 PR 到 main
-        5. 用 gh pr merge --auto --squash 设置自动合入
-        6. 完成后输出 PR 链接
+        2. 查看现有测试文件，在其中添加/修改测试用例
+        3. git push 并用 gh pr create 创建 PR 到 main
+        4. 用 gh pr merge --auto --squash 设置自动合入
+        5. 完成后输出 PR 链接
         """
 
         async_send_and_notify(state.agent_b_id, test_prompt, :tests_written)
@@ -244,19 +250,40 @@ defmodule Trinity.AutoPilot do
   def handle_info(:check_ci, %{phase: :waiting_ci} = state) do
     case check_pr_ci(state.project_path, state.feat_pr_url) do
       :success ->
-        Logger.info("[AutoPilot] CI passed for #{state.id}")
-        state = %{state | phase: :done, merge_poll_ref: nil}
-        broadcast_phase(state.id, "done")
+        Logger.info("[AutoPilot] CI passed for #{state.id}, merging and tagging")
+        state = %{state | phase: :merging, merge_poll_ref: nil}
+        broadcast_phase(state.id, "merging")
+
+        merge_prompt = """
+        CI 全部通过。请执行：
+        1. 用 gh pr merge #{state.feat_pr_url} --squash --auto 合并 PR
+        2. 等待合并完成后 git checkout main && git pull origin main
+        3. 读取当前最新的 git tag（如 v1.0.0），按语义化版本递增 patch 版本号
+        4. 如果没有已有 tag，从 v0.1.0 开始
+        5. 用 git tag <新版本号> 打标签
+        6. 用 git push origin <新版本号> 推送标签
+        7. 完成后输出新的版本号
+        """
+
+        async_send_and_notify(state.agent_a_id, merge_prompt, :release_done)
         {:noreply, state}
 
       :failure ->
-        Logger.warning("[AutoPilot] CI failed for #{state.id}, asking Agent A to fix")
+        Logger.warning("[AutoPilot] CI failed for #{state.id}, fetching failure logs")
         state = %{state | phase: :fixing, merge_poll_ref: nil}
         broadcast_phase(state.id, "fixing")
 
+        failure_log = get_ci_failure_log(state.project_path, state.feat_pr_url)
+
         fix_prompt = """
-        CI 测试失败了。请执行：
-        1. 用 gh run view --log-failed 查看失败日志
+        CI 测试失败了。以下是失败日志：
+
+        ```
+        #{failure_log}
+        ```
+
+        请执行：
+        1. 根据上面的失败日志分析问题原因
         2. 修复代码问题
         3. 运行本地测试确认通过
         4. git push（同一分支，CI 会重新运行）
@@ -270,6 +297,13 @@ defmodule Trinity.AutoPilot do
         ref = Process.send_after(self(), :check_ci, 15_000)
         {:noreply, %{state | merge_poll_ref: ref}}
     end
+  end
+
+  def handle_info(:release_done, %{phase: :merging} = state) do
+    Logger.info("[AutoPilot] Release done for #{state.id}")
+    state = %{state | phase: :done, merge_poll_ref: nil}
+    broadcast_phase(state.id, "done")
+    {:noreply, state}
   end
 
   def handle_info(:fix_pushed, %{phase: :fixing} = state) do
@@ -371,28 +405,60 @@ defmodule Trinity.AutoPilot do
   defp check_pr_ci(project_path, pr_url) do
     case System.cmd(
            "gh",
-           ["pr", "checks", pr_url, "--json", "state,conclusion", "-q", "[.[] | .conclusion]"],
+           ["pr", "checks", pr_url, "--json", "state,name"],
            cd: project_path,
            stderr_to_stdout: true
          ) do
       {output, 0} ->
-        conclusions =
-          output
-          |> String.trim()
-          |> String.replace(["[", "]", "\""], "")
-          |> String.split(",", trim: true)
-          |> Enum.map(&String.trim/1)
+        case Jason.decode(output) do
+          {:ok, checks} when is_list(checks) and checks != [] ->
+            states = Enum.map(checks, fn c -> String.upcase(c["state"] || "") end)
 
-        cond do
-          conclusions == [] -> :pending
-          Enum.any?(conclusions, &(&1 == "")) -> :pending
-          Enum.all?(conclusions, &(&1 == "SUCCESS" or &1 == "success")) -> :success
-          Enum.any?(conclusions, &(&1 in ["FAILURE", "failure", "CANCELLED", "cancelled"])) -> :failure
-          true -> :pending
+            cond do
+              Enum.all?(states, &(&1 == "SUCCESS")) -> :success
+              Enum.any?(states, &(&1 in ["FAILURE", "CANCELLED", "ERROR"])) -> :failure
+              true -> :pending
+            end
+
+          _ ->
+            :pending
         end
 
       _ ->
         :pending
+    end
+  end
+
+  defp get_ci_failure_log(_project_path, nil) do
+    Logger.warning("[AutoPilot] No feat PR URL, cannot get failure log")
+    "Unable to fetch failure log: no PR URL"
+  end
+
+  defp get_ci_failure_log(project_path, pr_url) do
+    # Get the latest failed run link
+    case System.cmd(
+           "gh",
+           ["pr", "checks", pr_url, "--json", "name,state,link",
+            "-q", ".[] | select(.state == \"FAILURE\" or .state == \"ERROR\") | .link"],
+           cd: project_path,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        run_url = output |> String.trim() |> String.split("\n") |> List.first()
+        run_id = if run_url, do: run_url |> String.split("/") |> List.last()
+
+        if run_id && run_id != "" do
+          case System.cmd("gh", ["run", "view", run_id, "--log-failed"],
+                 cd: project_path, stderr_to_stdout: true) do
+            {log, 0} -> String.slice(log, -3000, 3000) || log
+            {err, _} -> "Failed to fetch log: #{String.slice(err, 0, 500)}"
+          end
+        else
+          "No failed run details found"
+        end
+
+      {err, _} ->
+        "Failed to query checks: #{String.slice(err, 0, 500)}"
     end
   end
 

@@ -20,6 +20,7 @@ export interface Message {
 export interface WorkflowStage {
   name: string;
   status: "completed" | "active";
+  count?: number;
 }
 
 export interface ProjectWorkflow {
@@ -36,6 +37,7 @@ export type AutoPilotPhase =
   | "writing_code"
   | "waiting_ci"
   | "fixing"
+  | "merging"
   | "done"
   | "error";
 

@@ -32,6 +32,7 @@ defmodule TrinityWeb.SessionController do
 
     workflows =
       sessions
+      |> Enum.reject(fn {project_id, _pid} -> String.starts_with?(project_id, "ap:") end)
       |> Enum.map(fn {project_id, _pid} ->
         Trinity.ClaudeSession.get_workflow(project_id)
       end)

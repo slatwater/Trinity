@@ -10,6 +10,7 @@ const PHASES: { key: AutoPilotPhase; label: string }[] = [
   { key: "waiting_merge", label: "Merge" },
   { key: "writing_code", label: "Code" },
   { key: "waiting_ci", label: "CI" },
+  { key: "merging", label: "Release" },
   { key: "done", label: "Done" },
 ];
 
@@ -143,7 +144,7 @@ export function AutoPilotPanel({
   }
 
   // "fixing" maps to the same position as "waiting_ci" in the phase bar
-  const displayPhase = status.phase === "fixing" ? "waiting_ci" : status.phase;
+  const displayPhase = status.phase === "fixing" ? "waiting_ci" : status.phase as AutoPilotPhase;
   const currentPhaseIndex = PHASES.findIndex((p) => p.key === displayPhase);
 
   // Agent A messages — skip the first pair (system prompt + initial response)
@@ -198,7 +199,7 @@ export function AutoPilotPanel({
             <PhaseStep
               label={phase.label}
               state={
-                i < currentPhaseIndex
+                i < currentPhaseIndex || status.phase === "done"
                   ? "completed"
                   : i === currentPhaseIndex
                     ? "active"
@@ -261,9 +262,12 @@ export function AutoPilotPanel({
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) =>
-                e.key === "Enter" && !e.shiftKey && sendMessage()
-              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
               placeholder="Reply..."
               className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
               style={{
@@ -396,6 +400,18 @@ export function AutoPilotPanel({
             CI failed — Agent A is fixing...
           </div>
         )}
+        {status.phase === "merging" && (
+          <div
+            className="flex items-center gap-2 text-xs"
+            style={{ color: "var(--accent)" }}
+          >
+            <span
+              className="w-1.5 h-1.5 rounded-full animate-pulse"
+              style={{ background: "var(--accent)" }}
+            />
+            Merging PR and creating release tag...
+          </div>
+        )}
 
         {/* Done */}
         {status.phase === "done" && (
@@ -525,6 +541,9 @@ function AgentWorkflow({
                 />
               )}
               {stage.name}
+              {stage.count && stage.count > 1 && (
+                <span style={{ opacity: 0.6 }}>&times;{stage.count}</span>
+              )}
             </span>
           </Fragment>
         ))}

@@ -12,6 +12,7 @@ export function ChatWindow({ project }: { project: Project }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sendingRef = useRef(false);
 
   const { sessions, isLoading, addMessage, appendToLastMessage, setLoading } = useChatStore();
 
@@ -20,6 +21,8 @@ export function ChatWindow({ project }: { project: Project }) {
 
   // Fetch messages from backend and apply to store
   const fetchAndApply = useCallback(async () => {
+    // Skip if actively sending/streaming — prevents overwriting frontend state with stale backend data
+    if (sendingRef.current) return null;
     try {
       const res = await fetch(`/api/messages?id=${project.id}`);
       if (!res.ok) return null;
@@ -29,6 +32,10 @@ export function ChatWindow({ project }: { project: Project }) {
 
       if (backendMsgs.length > 0) {
         useChatStore.setState((state) => {
+          // Only apply if backend has more messages than frontend (don't overwrite newer local state)
+          const currentMsgs = state.sessions[project.id] || [];
+          if (backendMsgs.length < currentMsgs.length) return state;
+
           const newMsgs: Message[] = backendMsgs.map((m, i) => ({
             id: `msg-${i}`,
             role: m.role as "user" | "assistant",
@@ -100,6 +107,12 @@ export function ChatWindow({ project }: { project: Project }) {
     const prompt = input.trim();
     if (!prompt || loading) return;
 
+    // Stop any active poll to prevent it from overwriting state
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    sendingRef.current = true;
     setInput("");
 
     const userMsg: Message = {
@@ -179,6 +192,7 @@ export function ChatWindow({ project }: { project: Project }) {
       // SSE disconnected — backend continues, poll will pick up the result
     } finally {
       abortRef.current = null;
+      sendingRef.current = false;
       setActiveTool(null);
       setLoading(project.id, false);
       // Remove streaming indicator
@@ -207,7 +221,7 @@ export function ChatWindow({ project }: { project: Project }) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       sendMessage();
     }

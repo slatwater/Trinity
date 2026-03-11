@@ -8,7 +8,7 @@ Claude Code 本地开发流程可视化客户端 + Auto Pilot 全自动开发模
 - **后端**: Elixir/Phoenix API (port 4000) + ClaudeAgentSDK
 - Next.js 通过 `next.config.ts` rewrites 代理所有 `/api/*` 到 Elixir 后端
 - 每个项目一个持久化 Claude 进程（GenServer），多轮对话共享上下文
-- **Auto Pilot**: 双 Agent 编排器，状态机驱动全自动开发流程（澄清→规格→测试→合入→编码→CI→修复）
+- **Auto Pilot**: 双 Agent 编排器，状态机驱动全自动开发流程（澄清→规格→测试→合入→编码→CI→修复→发布）
 
 ## 开发命令
 
@@ -63,18 +63,16 @@ backend/
 | `POST /api/autopilot/:id/confirm` | 确认规格，触发 Agent B 写测试 |
 | `DELETE /api/autopilot/:id` | 取消 |
 
-## 环境变量
-
-- `TRINITY_WORKSPACE`: 工作区根目录，默认 `~/Projects/`
-
 ## 代码规范
 
-- 前端组件用 "use client"，CSS 变量在 globals.css，Elixir 后端纯 API
+- 前端组件用 "use client"，CSS 变量在 globals.css，`TRINITY_WORKSPACE` 默认 `~/Projects/`
 
 ## 关键设计决策
 
 - ClaudeAgentSDK：`model: "opus"` + `effort: :high` + `preset: :claude_code` + `bypassPermissions`
-- SSE 流通过 PubSub 广播，GenServer 累积文本，断连不丢数据
+- SSE 流通过 PubSub 广播，每次请求唯一 topic 防止事件串线
 - Auto Pilot 编排：Task 异步调用 ClaudeSession + wait_for_idle 轮询完成
-- CI 监控：`gh pr checks` 轮询，失败自动让 Agent A 修复重推
+- CI 监控：`gh pr checks --json state` 轮询，失败日志直传 Agent A 修复
+- CI 通过后自动合并 PR + 打语义化版本 tag
+- Agent B 只修改已有测试文件，不新建，防止测试文件膨胀
 - 澄清阶段 prompt 强约束：禁止工具调用，仅允许提问
