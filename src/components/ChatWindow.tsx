@@ -9,7 +9,7 @@ export function ChatWindow({ project }: { project: Project }) {
   const [input, setInput] = useState("");
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sendingRef = useRef(false);
@@ -19,9 +19,7 @@ export function ChatWindow({ project }: { project: Project }) {
   const messages = sessions[project.id] || [];
   const loading = isLoading[project.id] || false;
 
-  // Fetch messages from backend and apply to store
   const fetchAndApply = useCallback(async () => {
-    // Skip if actively sending/streaming — prevents overwriting frontend state with stale backend data
     if (sendingRef.current) return null;
     try {
       const res = await fetch(`/api/messages?id=${project.id}`);
@@ -32,15 +30,23 @@ export function ChatWindow({ project }: { project: Project }) {
 
       if (backendMsgs.length > 0) {
         useChatStore.setState((state) => {
-          // Only apply if backend has more messages than frontend (don't overwrite newer local state)
           const currentMsgs = state.sessions[project.id] || [];
           if (backendMsgs.length < currentMsgs.length) return state;
 
+          if (backendMsgs.length === currentMsgs.length) {
+            const same = backendMsgs.every(
+              (m, i) => m.role === currentMsgs[i].role && m.content === currentMsgs[i].content
+            );
+            if (same && !(status === "busy" && !currentMsgs[currentMsgs.length - 1]?.isStreaming)) {
+              return state;
+            }
+          }
+
           const newMsgs: Message[] = backendMsgs.map((m, i) => ({
-            id: `msg-${i}`,
+            id: currentMsgs[i]?.id || `msg-${i}`,
             role: m.role as "user" | "assistant",
             content: m.content,
-            timestamp: new Date().toISOString(),
+            timestamp: currentMsgs[i]?.timestamp || new Date().toISOString(),
             isStreaming: status === "busy" && i === backendMsgs.length - 1 && m.role === "assistant",
           }));
           const sessions = { ...state.sessions, [project.id]: newMsgs };
@@ -54,15 +60,11 @@ export function ChatWindow({ project }: { project: Project }) {
     }
   }, [project.id]);
 
-  // On mount: fetch backend messages, poll if busy
   useEffect(() => {
     let cancelled = false;
-
     const init = async () => {
       const status = await fetchAndApply();
-
       if (status === "busy" && !cancelled) {
-        // Task is running, poll for updates
         pollRef.current = setInterval(async () => {
           const s = await fetchAndApply();
           if (s !== "busy" && pollRef.current) {
@@ -72,15 +74,10 @@ export function ChatWindow({ project }: { project: Project }) {
         }, 2000);
       }
     };
-
     init();
-
     return () => {
       cancelled = true;
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     };
   }, [project.id, fetchAndApply]);
 
@@ -88,49 +85,20 @@ export function ChatWindow({ project }: { project: Project }) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, [project.id]);
-
-  // Abort fetch on unmount
-  useEffect(() => {
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, []);
+  useEffect(() => { scrollToBottom(); }, [messages, scrollToBottom]);
+  useEffect(() => { inputRef.current?.focus(); }, [project.id]);
+  useEffect(() => { return () => { abortRef.current?.abort(); }; }, []);
 
   const sendMessage = async () => {
     const prompt = input.trim();
     if (!prompt || loading) return;
 
-    // Stop any active poll to prevent it from overwriting state
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     sendingRef.current = true;
     setInput("");
 
-    const userMsg: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: prompt,
-      timestamp: new Date().toISOString(),
-    };
-    addMessage(project.id, userMsg);
-
-    const assistantMsg: Message = {
-      id: crypto.randomUUID(),
-      role: "assistant",
-      content: "",
-      timestamp: new Date().toISOString(),
-      isStreaming: true,
-    };
-    addMessage(project.id, assistantMsg);
+    addMessage(project.id, { id: crypto.randomUUID(), role: "user", content: prompt, timestamp: new Date().toISOString() });
+    addMessage(project.id, { id: crypto.randomUUID(), role: "assistant", content: "", timestamp: new Date().toISOString(), isStreaming: true });
     setLoading(project.id, true);
 
     const abortController = new AbortController();
@@ -140,148 +108,111 @@ export function ChatWindow({ project }: { project: Project }) {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectPath: project.path,
-          prompt,
-          sessionId: project.id,
-        }),
+        body: JSON.stringify({ projectPath: project.path, prompt, sessionId: project.id }),
         signal: abortController.signal,
       });
-
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
-
       if (!reader) throw new Error("No reader");
 
       let done = false;
       while (!done) {
         const { value, done: readerDone } = await reader.read();
         done = readerDone;
-
         if (value) {
           const text = decoder.decode(value, { stream: true });
-          const lines = text.split("\n");
-
-          for (const line of lines) {
+          for (const line of text.split("\n")) {
             if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6);
             try {
-              const data = JSON.parse(jsonStr);
-              if (data.type === "done") {
-                setActiveTool(null);
-                break;
-              }
-              if (data.type === "error") {
-                setActiveTool(null);
-                appendToLastMessage(project.id, `\n[Error: ${data.content}]`);
-                break;
-              }
-              if (data.type === "tool_use" && data.tool) {
-                setActiveTool(data.tool);
-              } else if (data.content) {
-                setActiveTool(null);
-                appendToLastMessage(project.id, data.content);
-              }
-            } catch { /* skip malformed */ }
+              const data = JSON.parse(line.slice(6));
+              if (data.type === "done") { setActiveTool(null); break; }
+              if (data.type === "error") { setActiveTool(null); appendToLastMessage(project.id, `\n[Error: ${data.content}]`); break; }
+              if (data.type === "tool_use" && data.tool) { setActiveTool(data.tool); }
+              else if (data.content) { setActiveTool(null); appendToLastMessage(project.id, data.content); }
+            } catch { /* skip */ }
           }
         }
       }
-    } catch {
-      // SSE disconnected — backend continues, poll will pick up the result
-    } finally {
+    } catch { /* SSE disconnected */ }
+    finally {
       abortRef.current = null;
-      sendingRef.current = false;
       setActiveTool(null);
       setLoading(project.id, false);
-      // Remove streaming indicator
       useChatStore.setState((state) => {
         const msgs = state.sessions[project.id] || [];
         if (msgs.length === 0) return state;
         const last = msgs[msgs.length - 1];
-        return {
-          sessions: {
-            ...state.sessions,
-            [project.id]: [...msgs.slice(0, -1), { ...last, isStreaming: false }],
-          },
-        };
+        return { sessions: { ...state.sessions, [project.id]: [...msgs.slice(0, -1), { ...last, isStreaming: false }] } };
       });
-
-      // Start polling to get complete response from backend
-      if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = setInterval(async () => {
-        const s = await fetchAndApply();
-        if (s !== "busy" && pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
-      }, 2000);
+      setTimeout(() => {
+        sendingRef.current = false;
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = setInterval(async () => {
+          const s = await fetchAndApply();
+          if (s !== "busy" && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        }, 2000);
+      }, 1500);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      sendMessage();
-    }
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); sendMessage(); }
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6">
-        {messages.length === 0 && (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center" style={{ color: "var(--text-secondary)" }}>
-              <div className="text-4xl mb-4 opacity-20">{">"}_</div>
-              <p className="text-sm">Send a message to start chatting with Claude</p>
-              <p className="text-xs mt-2 opacity-60">
-                Working in: {project.path}
-              </p>
+    <div className="flex flex-col h-full" style={{ fontFamily: "var(--font-sans)" }}>
+      <div className="flex-1 overflow-y-auto" style={{ padding: "32px 32px 16px" }}>
+        <div className="mx-auto" style={{ maxWidth: 860, width: "100%" }}>
+          {messages.length === 0 && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center" style={{ color: "var(--text-secondary)" }}>
+                <div className="text-4xl mb-4 opacity-20" style={{ fontFamily: "var(--font-mono)" }}>{">"}_</div>
+                <p className="text-sm">Send a message to start chatting with Claude</p>
+                <p className="text-xs mt-2 opacity-60" style={{ fontFamily: "var(--font-mono)" }}>{project.path}</p>
+              </div>
             </div>
-          </div>
-        )}
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
-        ))}
-        {activeTool && (
-          <div className="flex items-center gap-2 px-4 py-2 mb-2 rounded-lg text-xs"
-            style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}>
-            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--accent)" }} />
-            {activeTool}
-          </div>
-        )}
-        <div ref={messagesEndRef} />
+          )}
+          {messages.map((msg) => (
+            <MessageBubble key={msg.id} message={msg} />
+          ))}
+          {activeTool && (
+            <div
+              className="flex items-center gap-2 px-4 py-2 mb-2 rounded-lg text-xs"
+              style={{ background: "var(--stage-active-bg)", color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: "var(--accent)" }} />
+              {activeTool}
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
 
-      {/* Input */}
-      <div className="p-4 border-t" style={{ borderColor: "var(--border)" }}>
-        <div className="flex gap-2">
-          <textarea
+      <div className="shrink-0" style={{ padding: "16px 32px 24px" }}>
+        <div className="mx-auto relative" style={{ maxWidth: 860 }}>
+          <input
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Send a message... (Enter to send, Shift+Enter for newline)"
-            rows={3}
-            className="flex-1 resize-none rounded-lg px-4 py-3 text-sm outline-none placeholder:opacity-40"
+            placeholder="Send a message..."
+            className="w-full outline-none transition-all duration-300"
             style={{
-              background: "var(--bg-tertiary)",
-              color: "var(--text-primary)",
+              background: "var(--bg-secondary)",
               border: "1px solid var(--border)",
+              borderRadius: 14,
+              padding: "14px 100px 14px 20px",
+              color: "var(--text-primary)",
+              fontSize: 14,
+              fontFamily: "var(--font-sans)",
             }}
-            onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
+            onFocus={(e) => (e.target.style.borderColor = "var(--accent-focus)")}
             onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
           />
-          <button
-            onClick={sendMessage}
-            disabled={loading || !input.trim()}
-            className="self-end px-4 py-3 rounded-lg text-sm font-medium transition-colors disabled:opacity-30"
-            style={{ background: "var(--accent)", color: "#fff" }}
-          >
-            {loading ? "..." : "Send"}
-          </button>
+          <div className="absolute flex items-center gap-1" style={{ right: 14, top: "50%", transform: "translateY(-50%)" }}>
+            <span className="text-[10px]" style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>Enter &crarr;</span>
+          </div>
         </div>
       </div>
     </div>

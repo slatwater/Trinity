@@ -65,61 +65,87 @@ export default function ProjectPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-screen" style={{ fontFamily: "var(--font-sans)" }}>
       {/* Top Bar */}
       <header
-        className="flex items-center justify-between px-6 py-3 border-b shrink-0"
-        style={{ borderColor: "var(--border)", background: "var(--bg-secondary)" }}
+        className="flex items-center justify-between shrink-0"
+        style={{
+          padding: "16px 32px",
+          borderBottom: "1px solid var(--border-subtle)",
+        }}
       >
         <div className="flex items-center gap-4">
           <button
             onClick={() => router.push("/")}
-            className="text-sm hover:underline"
-            style={{ color: "var(--text-secondary)" }}
+            className="flex items-center gap-1.5 cursor-pointer transition-colors duration-300"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text-muted)",
+              fontSize: 13,
+              fontFamily: "var(--font-mono)",
+              padding: 0,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
           >
-            &larr; Back
+            <span style={{ fontSize: 16 }}>&larr;</span> Back
           </button>
-          <div className="flex items-center gap-2">
-            <span
-              className="w-2 h-2 rounded-full shrink-0"
-              style={{ background: processAlive ? "#22c55e" : "var(--border)" }}
-              title={processAlive ? "Process running" : "No active process"}
+
+          <div style={{ width: 1, height: 20, background: "var(--border)" }} />
+
+          <div className="flex items-center gap-2.5">
+            <div
+              className="rounded-full shrink-0"
+              style={{
+                width: 6, height: 6,
+                background: processAlive ? "var(--success)" : "var(--border)",
+              }}
             />
-            <div>
-              <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                {project.name}
-              </h2>
-              <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                {project.path}
-              </p>
-            </div>
+            <span
+              className="text-[17px] font-normal"
+              style={{ color: "var(--text-primary)", fontFamily: "var(--font-serif)" }}
+            >
+              {project.name}
+            </span>
+            {project.version && (
+              <span
+                className="text-[10px] px-2 py-0.5 rounded"
+                style={{
+                  color: "var(--text-muted)",
+                  fontFamily: "var(--font-mono)",
+                  background: "var(--accent-bg)",
+                  border: "1px solid var(--accent-border)",
+                }}
+              >
+                {project.version}
+              </span>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {project.language && (
-            <span className="text-xs px-2 py-1 rounded" style={{ background: "var(--bg-primary)", color: "var(--text-secondary)" }}>
-              {project.language}
-            </span>
-          )}
-          <button
-            onClick={async () => {
-              await fetch("/api/session", {
-                method: "DELETE",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sessionId: project.id }),
-              });
-              useChatStore.getState().clearSession(project.id);
-            }}
-            className="text-xs px-3 py-1.5 rounded-lg transition-colors"
-            style={{
-              background: "var(--bg-primary)",
-              color: "var(--text-secondary)",
-              border: "1px solid var(--border)",
-            }}
-          >
-            New Chat
-          </button>
-        </div>
+
+        <button
+          onClick={async () => {
+            await fetch("/api/session", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sessionId: project.id }),
+            });
+            useChatStore.getState().clearSession(project.id);
+          }}
+          className="cursor-pointer transition-all duration-300"
+          style={{
+            background: "var(--bg-tertiary)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: "7px 18px",
+            color: "var(--text-muted)",
+            fontSize: 12,
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          New Chat
+        </button>
       </header>
 
       {/* Chat */}

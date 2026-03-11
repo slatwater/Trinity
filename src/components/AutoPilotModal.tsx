@@ -14,6 +14,8 @@ export function AutoPilotModal({ projects, onClose, onStart }: Props) {
   const [requirement, setRequirement] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const ready = projectId && requirement.trim();
+
   const handleSubmit = async () => {
     const project = projects.find((p) => p.id === projectId);
     if (!project || !requirement.trim()) return;
@@ -23,11 +25,7 @@ export function AutoPilotModal({ projects, onClose, onStart }: Props) {
       const res = await fetch("/api/autopilot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId: project.id,
-          projectPath: project.path,
-          requirement: requirement.trim(),
-        }),
+        body: JSON.stringify({ projectId: project.id, projectPath: project.path, requirement: requirement.trim() }),
       });
       if (!res.ok) throw new Error("Failed");
       const data = await res.json();
@@ -40,85 +38,63 @@ export function AutoPilotModal({ projects, onClose, onStart }: Props) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: "rgba(0,0,0,0.6)" }}
-      onClick={onClose}
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ animation: "backdropIn 0.3s both" }}>
+      <div className="absolute inset-0" onClick={onClose} style={{ background: "var(--overlay-bg)", backdropFilter: "var(--overlay-blur)" }} />
       <div
-        className="w-full max-w-lg rounded-xl p-6"
+        className="relative"
         style={{
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border)",
+          width: 460, background: "var(--modal-bg)", border: "1px solid var(--border)",
+          borderRadius: 20, padding: "40px 36px 32px",
+          boxShadow: "var(--modal-shadow)",
+          animation: "modalIn 0.45s 0.1s both cubic-bezier(0.16,1,0.3,1)",
         }}
-        onClick={(e) => e.stopPropagation()}
       >
-        <h2
-          className="text-lg font-bold mb-4"
-          style={{ color: "var(--text-primary)" }}
-        >
+        <div className="absolute top-0" style={{ left: 32, right: 32, height: 1, background: `linear-gradient(90deg, transparent, var(--modal-accent-line), transparent)` }} />
+
+        <h2 className="text-2xl font-light m-0 mb-8" style={{ color: "var(--text-primary)", letterSpacing: "-0.03em", fontFamily: "var(--font-serif)" }}>
           Auto Pilot
         </h2>
 
-        <label
-          className="block text-xs mb-2"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          Project
-        </label>
-        <select
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-          className="w-full px-3 py-2 rounded-lg text-sm mb-4 outline-none"
-          style={{
-            background: "var(--bg-tertiary)",
-            color: "var(--text-primary)",
-            border: "1px solid var(--border)",
-          }}
-        >
-          <option value="">Select project...</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+        <div className="mb-5">
+          <label className="block text-[10px] font-semibold uppercase mb-2" style={{ color: "var(--text-muted)", letterSpacing: "0.14em", fontFamily: "var(--font-mono)" }}>Project</label>
+          <div className="relative">
+            <select
+              value={projectId} onChange={(e) => setProjectId(e.target.value)}
+              className="w-full cursor-pointer outline-none appearance-none transition-all duration-300"
+              style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)", borderRadius: 12, padding: "13px 16px", color: projectId ? "var(--text-primary)" : "var(--text-muted)", fontSize: 13, fontFamily: "var(--font-mono)" }}
+              onFocus={(e) => (e.target.style.borderColor = "var(--text-dim)")} onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
+            >
+              <option value="" disabled>Select project...</option>
+              {projects.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
+            </select>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" className="pointer-events-none absolute" style={{ right: 14, top: "50%", transform: "translateY(-50%)" }}><path d="m6 9 6 6 6-6" /></svg>
+          </div>
+        </div>
 
-        <label
-          className="block text-xs mb-2"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          Requirement
-        </label>
-        <textarea
-          value={requirement}
-          onChange={(e) => setRequirement(e.target.value)}
-          placeholder="Describe the feature you want..."
-          rows={4}
-          className="w-full resize-none rounded-lg px-3 py-2 text-sm mb-4 outline-none"
-          style={{
-            background: "var(--bg-tertiary)",
-            color: "var(--text-primary)",
-            border: "1px solid var(--border)",
-          }}
-        />
+        <div className="mb-8">
+          <label className="block text-[10px] font-semibold uppercase mb-2" style={{ color: "var(--text-muted)", letterSpacing: "0.14em", fontFamily: "var(--font-mono)" }}>Requirement</label>
+          <textarea
+            value={requirement} onChange={(e) => setRequirement(e.target.value)}
+            placeholder="Describe the feature you want..." rows={4}
+            className="w-full outline-none resize-y transition-all duration-300"
+            style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px", color: "var(--text-primary)", fontSize: 13, fontFamily: "var(--font-sans)", lineHeight: 1.6 }}
+            onFocus={(e) => (e.target.style.borderColor = "var(--text-dim)")} onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
+          />
+        </div>
 
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2.5">
+          <button onClick={onClose} className="cursor-pointer transition-all duration-300" style={{ background: "transparent", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 22px", color: "var(--text-muted)", fontSize: 13 }}>Cancel</button>
           <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg text-sm"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={loading || !projectId || !requirement.trim()}
-            className="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-30"
-            style={{ background: "var(--accent)", color: "#fff" }}
-          >
-            {loading ? "Starting..." : "Start"}
-          </button>
+            onClick={handleSubmit} disabled={loading || !ready}
+            className="cursor-pointer font-bold transition-all duration-300"
+            style={{
+              background: ready ? "linear-gradient(135deg, var(--accent), var(--accent-hover))" : "var(--border)",
+              color: ready ? "var(--accent-text-on)" : "var(--text-muted)",
+              border: "none", borderRadius: 10, padding: "10px 28px", fontSize: 13,
+              boxShadow: ready ? "var(--accent-shadow)" : "none",
+              cursor: ready ? "pointer" : "default",
+            }}
+          >{loading ? "Starting..." : "Start"}</button>
         </div>
       </div>
     </div>

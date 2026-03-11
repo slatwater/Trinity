@@ -1,9 +1,17 @@
+export interface ProjectConfig {
+  type: "claude-hooks" | "git-hooks" | "rules" | "mcp";
+  label: string;
+  items: string[];
+}
+
 export interface Project {
   id: string;
   name: string;
   path: string;
-  description?: string;
-  language?: string;
+  version?: string;
+  versionMessage?: string;
+  claudeMdContent?: string;
+  configs: ProjectConfig[];
   lastModified: string;
   hasGit: boolean;
   hasClaude: boolean;

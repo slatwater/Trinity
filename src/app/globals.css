@@ -1,27 +1,251 @@
 @import "tailwindcss";
 
 :root {
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #141414;
-  --bg-tertiary: #1e1e1e;
-  --border: #2a2a2a;
-  --text-primary: #e5e5e5;
-  --text-secondary: #a0a0a0;
-  --accent: #6366f1;
-  --accent-hover: #818cf8;
+  /* Backgrounds */
+  --bg-primary: #100f0e;
+  --bg-secondary: #151413;
+  --bg-tertiary: #1c1b1a;
+  --card-hover-bg: #181716;
+
+  /* Borders */
+  --border: #252422;
+  --border-subtle: #1c1b1a;
+  --border-hover: #2a2826;
+
+  /* Text */
+  --text-primary: #f7f5f2;
+  --text-secondary: #999690;
+  --text-muted: #666460;
+  --text-dim: #3a3936;
+  --text-faint: #444440;
+  --text-card-title: #d0cec8;
+  --text-card-title-hover: #f2f0ed;
+  --text-time: #2e2d2b;
+  --text-time-hover: #555;
+
+  /* Accent */
+  --accent: #d4a574;
+  --accent-hover: #c49464;
+  --accent-bg: rgba(212,165,116,0.06);
+  --accent-border: rgba(212,165,116,0.1);
+  --accent-text-on: #100f0e;
+  --accent-shadow: 0 2px 16px rgba(212,165,116,0.15);
+  --accent-focus: rgba(212,165,116,0.3);
+
+  /* Status */
   --success: #22c55e;
+  --success-done: #4ade80;
   --warning: #eab308;
   --error: #ef4444;
+
+  /* Purple / CLAUDE.md */
+  --purple-bg: rgba(139,92,246,0.05);
+  --purple-bg-hover: rgba(139,92,246,0.1);
+  --purple-border: rgba(139,92,246,0.08);
+  --purple-color: #8070a8;
+  --purple-color-hover: #b49bfa;
+
+  /* Bubbles */
+  --user-bubble-bg: rgba(212,165,116,0.06);
+  --user-bubble-color: #d4c4b0;
+  --user-bubble-border: rgba(212,165,116,0.1);
+  --ai-bubble-bg: #151413;
+  --ai-bubble-color: #aaa8a2;
+  --ai-bubble-border: #1c1b1a;
+  --ai-bubble-shadow: none;
+  --system-bubble-bg: rgba(234,179,8,0.1);
+  --system-bubble-border: rgba(234,179,8,0.2);
+
+  /* Badges */
+  --badge-bg: rgba(255,255,255,0.02);
+  --badge-bg-hover: rgba(255,255,255,0.04);
+
+  /* Modal / Overlay */
+  --overlay-bg: rgba(0,0,0,0.65);
+  --overlay-blur: blur(12px);
+  --modal-bg: #161514;
+  --modal-shadow: none;
+  --modal-accent-line: rgba(212,165,116,0.2);
+  --modal-purple-line: rgba(139,92,246,0.2);
+
+  /* Cards */
+  --card-shadow: none;
+  --card-hover-shadow: none;
+  --accent-bar-idle-opacity: 0.5;
+
+  /* Ambient / Effects */
+  --ambient-warm: rgba(212,165,116,0.025);
+  --ambient-cool: rgba(122,172,191,0.02);
+  --scanline-color: rgba(212,165,116,0.01);
+  --divider-end: #1c1b1a;
+
+  /* Workflow */
+  --avatar-bg: rgba(122,172,191,0.06);
+  --avatar-border: rgba(122,172,191,0.08);
+  --avatar-color: #7aacbf;
+  --avatar-bg-idle: rgba(255,255,255,0.02);
+  --avatar-border-idle: rgba(255,255,255,0.04);
+  --stage-active-bg: rgba(212,165,116,0.04);
+  --stage-arrow-line: #222;
+  --stage-arrow-head: #2a2826;
+
+  /* Toggle */
+  --toggle-idle-bg: rgba(255,255,255,0.04);
+  --toggle-idle-border: rgba(255,255,255,0.06);
+  --toggle-idle-dot: #555;
+
+  /* Clarify chat */
+  --clarify-user-color: #d4c4b0;
+  --clarify-ai-color: #aaa8a2;
+  --timer-bg: rgba(255,255,255,0.03);
+  --timer-border: var(--border-subtle);
+  --confirm-bg: rgba(34,197,94,0.1);
+  --confirm-border: rgba(34,197,94,0.15);
+  --stage-done-bg: rgba(34,197,94,0.06);
+  --stage-done-border: rgba(34,197,94,0.06);
+  --stage-done-color: #4ade80;
+  --stage-pending-color: #444440;
+
+  /* Scrollbar */
+  --scrollbar-thumb: #252422;
+
+  /* Fonts */
+  --font-sans: 'DM Sans', sans-serif;
+  --font-serif: 'Playfair Display', Georgia, serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* ═══ Light Theme ═══ */
+[data-theme="light"] {
+  --bg-primary: #f8f6f3;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #faf8f6;
+  --card-hover-bg: #fdfcfb;
+
+  --border: #f0ede9;
+  --border-subtle: #ebe8e4;
+  --border-hover: #ddd8d2;
+
+  --text-primary: #1a1816;
+  --text-secondary: #6b6560;
+  --text-muted: #a09a94;
+  --text-dim: #c8c2bc;
+  --text-faint: #a09a94;
+  --text-card-title: #3a3530;
+  --text-card-title-hover: #1a1816;
+  --text-time: #c8c2bc;
+  --text-time-hover: #a09a94;
+
+  --accent: #b5845a;
+  --accent-hover: #a07348;
+  --accent-bg: rgba(181,132,90,0.06);
+  --accent-border: rgba(181,132,90,0.12);
+  --accent-text-on: #ffffff;
+  --accent-shadow: 0 2px 16px rgba(181,132,90,0.2);
+  --accent-focus: rgba(181,132,90,0.3);
+
+  --success-done: #16a34a;
+
+  --purple-bg: rgba(139,92,246,0.04);
+  --purple-bg-hover: rgba(139,92,246,0.08);
+  --purple-border: rgba(139,92,246,0.06);
+  --purple-color: #9a88b8;
+  --purple-color-hover: #7c5cbf;
+
+  --user-bubble-bg: rgba(181,132,90,0.06);
+  --user-bubble-color: #6b5540;
+  --user-bubble-border: rgba(181,132,90,0.12);
+  --ai-bubble-bg: #ffffff;
+  --ai-bubble-color: #6b6560;
+  --ai-bubble-border: #ebe8e4;
+  --ai-bubble-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  --system-bubble-bg: rgba(234,179,8,0.06);
+  --system-bubble-border: rgba(234,179,8,0.12);
+
+  --badge-bg: rgba(0,0,0,0.02);
+  --badge-bg-hover: rgba(0,0,0,0.04);
+
+  --overlay-bg: rgba(248,246,243,0.7);
+  --overlay-blur: blur(20px);
+  --modal-bg: #ffffff;
+  --modal-shadow: 0 24px 80px rgba(0,0,0,0.08);
+  --modal-accent-line: rgba(181,132,90,0.25);
+  --modal-purple-line: rgba(139,92,246,0.15);
+
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  --card-hover-shadow: 0 4px 24px rgba(0,0,0,0.04);
+  --accent-bar-idle-opacity: 0.4;
+
+  --ambient-warm: rgba(181,132,90,0.04);
+  --ambient-cool: rgba(90,143,163,0.03);
+  --scanline-color: rgba(181,132,90,0.015);
+  --divider-end: #ebe8e4;
+
+  --avatar-bg: rgba(90,143,163,0.06);
+  --avatar-border: rgba(90,143,163,0.1);
+  --avatar-color: #5a8fa3;
+  --avatar-bg-idle: rgba(0,0,0,0.02);
+  --avatar-border-idle: rgba(0,0,0,0.04);
+  --stage-active-bg: rgba(181,132,90,0.06);
+  --stage-arrow-line: #ddd8d2;
+  --stage-arrow-head: #c8c2bc;
+
+  --toggle-idle-bg: rgba(0,0,0,0.04);
+  --toggle-idle-border: rgba(0,0,0,0.06);
+  --toggle-idle-dot: #bbb;
+
+  --clarify-user-color: #6b5540;
+  --clarify-ai-color: #6b6560;
+  --timer-bg: rgba(0,0,0,0.02);
+  --timer-border: var(--border-subtle);
+  --confirm-bg: rgba(34,197,94,0.06);
+  --confirm-border: rgba(34,197,94,0.1);
+  --stage-done-bg: rgba(34,197,94,0.04);
+  --stage-done-border: rgba(34,197,94,0.04);
+  --stage-done-color: #16a34a;
+  --stage-pending-color: #c8c2bc;
+
+  --scrollbar-thumb: #ddd8d2;
 }
 
 body {
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-family: var(--font-sans);
+  transition: background 0.3s, color 0.3s;
 }
 
 /* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--bg-primary); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+
+/* Hide scrollbar for workflow stages */
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Animations */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes lineGrow {
+  from { width: 0; }
+  to { width: 100%; }
+}
+@keyframes scanline {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes backdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}

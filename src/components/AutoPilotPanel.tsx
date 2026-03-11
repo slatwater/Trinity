@@ -26,17 +26,16 @@ export function AutoPilotPanel({
   const [sending, setSending] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const startTimeRef = useRef(Date.now());
 
-  // Poll status
   const pollStatus = useCallback(async () => {
     try {
       const res = await fetch(`/api/autopilot/${autopilotId}`);
       if (res.ok) setStatus(await res.json());
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }, [autopilotId]);
 
   useEffect(() => {
@@ -50,10 +49,17 @@ export function AutoPilotPanel({
   }, [status?.agent_a?.messages, streamingText]);
 
   useEffect(() => {
-    return () => {
-      abortRef.current?.abort();
-    };
+    return () => { abortRef.current?.abort(); };
   }, []);
+
+  // Elapsed timer — stops when done
+  useEffect(() => {
+    if (status?.phase === "done" || status?.phase === "error") return;
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [status?.phase]);
 
   const sendMessage = async () => {
     const content = input.trim();
@@ -92,23 +98,17 @@ export function AutoPilotPanel({
             if (!line.startsWith("data: ")) continue;
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.type === "done") {
-                done = true;
-                break;
-              }
+              if (data.type === "done") { done = true; break; }
               if (data.type === "text" && data.content) {
                 accumulated += data.content;
                 setStreamingText(accumulated);
               }
-            } catch {
-              /* skip */
-            }
+            } catch { /* skip */ }
           }
         }
       }
-    } catch {
-      /* disconnected */
-    } finally {
+    } catch { /* disconnected */ }
+    finally {
       abortRef.current = null;
       setSending(false);
       setIsStreaming(false);
@@ -130,49 +130,59 @@ export function AutoPilotPanel({
   if (!status) {
     return (
       <div
-        className="mt-8 rounded-lg border p-6"
+        className="mt-8 p-6"
         style={{
-          borderColor: "var(--border)",
+          borderRadius: 16,
+          border: "1px solid var(--border-subtle)",
           background: "var(--bg-secondary)",
         }}
       >
-        <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
-          Loading...
-        </div>
+        <div className="text-sm" style={{ color: "var(--text-secondary)" }}>Loading...</div>
       </div>
     );
   }
 
-  // "fixing" maps to the same position as "waiting_ci" in the phase bar
   const displayPhase = status.phase === "fixing" ? "waiting_ci" : status.phase as AutoPilotPhase;
   const currentPhaseIndex = PHASES.findIndex((p) => p.key === displayPhase);
-
-  // Agent A messages — skip the first pair (system prompt + initial response)
   const clarifyMessages = (status.agent_a?.messages || []).slice(1);
 
   return (
     <section
-      className="mt-8 rounded-lg border overflow-hidden"
+      className="mt-8 overflow-hidden"
       style={{
-        borderColor: "var(--border)",
+        borderRadius: 16,
+        border: "1px solid var(--border-subtle)",
         background: "var(--bg-secondary)",
       }}
     >
       {/* Header */}
       <div
-        className="px-5 py-3 border-b flex items-center justify-between"
-        style={{ borderColor: "var(--border)" }}
+        className="flex items-center justify-between"
+        style={{ padding: "16px 24px", borderBottom: "1px solid var(--border-subtle)" }}
       >
         <div className="flex items-center gap-3 min-w-0">
           <h2
-            className="text-xs font-semibold tracking-wide uppercase shrink-0"
-            style={{ color: "var(--accent)" }}
+            className="text-xs font-semibold uppercase tracking-wider shrink-0"
+            style={{ color: "var(--accent)", fontFamily: "var(--font-mono)", letterSpacing: "0.14em" }}
           >
             Auto Pilot
           </h2>
           <span
+            className="text-[10px] shrink-0 tabular-nums"
+            style={{
+              color: status.phase === "done" ? "var(--success)" : "var(--text-dim)",
+              fontFamily: "var(--font-mono)",
+              background: status.phase === "done" ? "var(--stage-done-bg)" : "var(--timer-bg)",
+              border: `1px solid ${status.phase === "done" ? "var(--confirm-border)" : "var(--timer-border)"}`,
+              padding: "3px 10px",
+              borderRadius: 6,
+            }}
+          >
+            {formatElapsed(elapsed)}
+          </span>
+          <span
             className="text-xs truncate"
-            style={{ color: "var(--text-secondary)" }}
+            style={{ color: "var(--text-muted)" }}
           >
             {status.requirement}
           </span>
@@ -180,8 +190,15 @@ export function AutoPilotPanel({
         {status.phase !== "done" && (
           <button
             onClick={handleCancel}
-            className="text-xs px-2 py-1 rounded shrink-0 ml-2"
-            style={{ color: "var(--text-secondary)" }}
+            className="text-xs shrink-0 ml-2 cursor-pointer transition-colors duration-300"
+            style={{
+              color: "var(--text-muted)",
+              background: "transparent",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
+              padding: "5px 14px",
+              fontFamily: "var(--font-mono)",
+            }}
           >
             Cancel
           </button>
@@ -190,8 +207,8 @@ export function AutoPilotPanel({
 
       {/* Phase indicator bar */}
       <div
-        className="px-5 py-3 flex items-center gap-1 border-b overflow-x-auto"
-        style={{ borderColor: "var(--border)" }}
+        className="flex items-center gap-1 overflow-x-auto"
+        style={{ padding: "14px 24px", borderBottom: "1px solid var(--border-subtle)" }}
       >
         {PHASES.map((phase, i) => (
           <Fragment key={phase.key}>
@@ -212,24 +229,34 @@ export function AutoPilotPanel({
 
       {/* Clarification chat */}
       {status.phase === "clarifying" && (
-        <div
-          className="border-b"
-          style={{ borderColor: "var(--border)" }}
-        >
+        <div style={{ borderBottom: "1px solid var(--border-subtle)" }}>
           <div className="max-h-80 overflow-y-auto p-4 space-y-3">
             {clarifyMessages.map((msg, i) => (
               <div
                 key={i}
                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                style={{ animation: `msgIn 0.4s ${i * 0.05}s both` }}
               >
+                {msg.role !== "user" && (
+                  <div
+                    className="shrink-0 flex items-center justify-center font-semibold"
+                    style={{
+                      width: 24, height: 24, borderRadius: 6, marginRight: 10, marginTop: 2,
+                      background: "var(--accent-bg)", border: "1px solid var(--accent-border)",
+                      fontSize: 10, color: "var(--accent)", fontFamily: "var(--font-serif)",
+                    }}
+                  >
+                    T
+                  </div>
+                )}
                 <div
-                  className="max-w-[80%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap"
+                  className="max-w-[80%] text-sm whitespace-pre-wrap"
                   style={{
-                    background:
-                      msg.role === "user"
-                        ? "var(--accent)"
-                        : "var(--bg-tertiary)",
-                    color: msg.role === "user" ? "#fff" : "var(--text-primary)",
+                    padding: msg.role === "user" ? "10px 16px" : "14px 18px",
+                    borderRadius: msg.role === "user" ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
+                    background: msg.role === "user" ? "var(--accent-bg)" : "var(--bg-primary)",
+                    border: `1px solid ${msg.role === "user" ? "var(--accent-border)" : "var(--border-subtle)"}`,
+                    color: msg.role === "user" ? "var(--clarify-user-color)" : "var(--clarify-ai-color)",
                   }}
                 >
                   {msg.content}
@@ -239,10 +266,23 @@ export function AutoPilotPanel({
             {isStreaming && streamingText && (
               <div className="flex justify-start">
                 <div
-                  className="max-w-[80%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap"
+                  className="shrink-0 flex items-center justify-center font-semibold"
                   style={{
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
+                    width: 24, height: 24, borderRadius: 6, marginRight: 10, marginTop: 2,
+                    background: "var(--accent-bg)", border: "1px solid var(--accent-border)",
+                    fontSize: 10, color: "var(--accent)", fontFamily: "var(--font-serif)",
+                  }}
+                >
+                  T
+                </div>
+                <div
+                  className="max-w-[80%] text-sm whitespace-pre-wrap"
+                  style={{
+                    padding: "14px 18px",
+                    borderRadius: "14px 14px 14px 4px",
+                    background: "var(--bg-primary)",
+                    border: "1px solid var(--border-subtle)",
+                    color: "var(--clarify-ai-color)",
                   }}
                 >
                   {streamingText}
@@ -257,7 +297,7 @@ export function AutoPilotPanel({
           </div>
 
           {/* Input + Confirm */}
-          <div className="p-3 flex gap-2">
+          <div className="flex gap-2" style={{ padding: "12px 16px" }}>
             <input
               type="text"
               value={input}
@@ -269,21 +309,30 @@ export function AutoPilotPanel({
                 }
               }}
               placeholder="Reply..."
-              className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
+              className="flex-1 text-sm outline-none transition-all duration-300"
               style={{
-                background: "var(--bg-tertiary)",
-                color: "var(--text-primary)",
+                background: "var(--bg-primary)",
                 border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: "10px 14px",
+                color: "var(--text-primary)",
+                fontFamily: "var(--font-sans)",
               }}
+              onFocus={(e) => (e.target.style.borderColor = "var(--accent-focus)")}
+              onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
             />
             <button
               onClick={sendMessage}
               disabled={sending || !input.trim()}
-              className="px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-30"
+              className="text-sm disabled:opacity-30 cursor-pointer transition-all duration-300"
               style={{
                 background: "var(--bg-tertiary)",
-                color: "var(--text-primary)",
                 border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: "10px 16px",
+                color: "var(--text-secondary)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
               }}
             >
               Send
@@ -291,8 +340,15 @@ export function AutoPilotPanel({
             <button
               onClick={handleConfirm}
               disabled={sending}
-              className="px-3 py-2 rounded-lg text-sm font-medium disabled:opacity-30"
-              style={{ background: "var(--success)", color: "#fff" }}
+              className="text-sm font-semibold disabled:opacity-30 cursor-pointer transition-all duration-300"
+              style={{
+                background: "var(--confirm-bg)",
+                border: `1px solid var(--confirm-border)`,
+                borderRadius: 10,
+                padding: "10px 20px",
+                color: "var(--success)",
+                fontSize: 12,
+              }}
             >
               Confirm
             </button>
@@ -300,21 +356,18 @@ export function AutoPilotPanel({
         </div>
       )}
 
-      {/* Spec display (post-clarification phases) */}
+      {/* Spec display */}
       {status.spec && status.phase !== "clarifying" && (
-        <div
-          className="border-b p-4"
-          style={{ borderColor: "var(--border)" }}
-        >
+        <div style={{ padding: "16px 24px", borderBottom: "1px solid var(--border-subtle)" }}>
           <div
-            className="text-xs font-semibold mb-2 uppercase"
-            style={{ color: "var(--text-secondary)" }}
+            className="text-[10px] font-semibold uppercase mb-2"
+            style={{ color: "var(--text-muted)", letterSpacing: "0.14em", fontFamily: "var(--font-mono)" }}
           >
             Spec
           </div>
           <div
-            className="text-sm whitespace-pre-wrap max-h-40 overflow-y-auto"
-            style={{ color: "var(--text-primary)" }}
+            className="text-sm whitespace-pre-wrap max-h-40 overflow-y-auto leading-relaxed"
+            style={{ color: "var(--clarify-ai-color)" }}
           >
             {status.spec}
           </div>
@@ -322,18 +375,13 @@ export function AutoPilotPanel({
       )}
 
       {/* Agent workflows + status */}
-      <div className="p-4 space-y-3">
-        {/* Agent A workflow */}
-        {status.agent_a?.workflow?.stages &&
-          status.agent_a.workflow.stages.length > 0 && (
-            <AgentWorkflow label="Agent A" workflow={status.agent_a.workflow} />
-          )}
-
-        {/* Agent B workflow */}
-        {status.agent_b?.workflow?.stages &&
-          status.agent_b.workflow.stages.length > 0 && (
-            <AgentWorkflow label="Agent B" workflow={status.agent_b.workflow} />
-          )}
+      <div className="space-y-3" style={{ padding: "16px 24px" }}>
+        {status.agent_a?.workflow?.stages && status.agent_a.workflow.stages.length > 0 && (
+          <AgentWorkflow label="Agent A" workflow={status.agent_a.workflow} />
+        )}
+        {status.agent_b?.workflow?.stages && status.agent_b.workflow.stages.length > 0 && (
+          <AgentWorkflow label="Agent B" workflow={status.agent_b.workflow} />
+        )}
 
         {/* PR links */}
         {(status.test_pr_url || status.feat_pr_url) && (
@@ -363,57 +411,19 @@ export function AutoPilotPanel({
           </div>
         )}
 
-        {/* Waiting indicators */}
+        {/* Status indicators */}
         {status.phase === "waiting_merge" && (
-          <div
-            className="flex items-center gap-2 text-xs"
-            style={{ color: "var(--warning)" }}
-          >
-            <span
-              className="w-1.5 h-1.5 rounded-full animate-pulse"
-              style={{ background: "var(--warning)" }}
-            />
-            Waiting for test PR to merge...
-          </div>
+          <StatusIndicator color="var(--warning)" text="Waiting for test PR to merge..." />
         )}
         {status.phase === "waiting_ci" && (
-          <div
-            className="flex items-center gap-2 text-xs"
-            style={{ color: "var(--warning)" }}
-          >
-            <span
-              className="w-1.5 h-1.5 rounded-full animate-pulse"
-              style={{ background: "var(--warning)" }}
-            />
-            Waiting for CI to pass...
-          </div>
+          <StatusIndicator color="var(--warning)" text="Waiting for CI to pass..." />
         )}
         {status.phase === "fixing" && (
-          <div
-            className="flex items-center gap-2 text-xs"
-            style={{ color: "var(--error)" }}
-          >
-            <span
-              className="w-1.5 h-1.5 rounded-full animate-pulse"
-              style={{ background: "var(--error)" }}
-            />
-            CI failed — Agent A is fixing...
-          </div>
+          <StatusIndicator color="var(--error)" text="CI failed — Agent A is fixing..." />
         )}
         {status.phase === "merging" && (
-          <div
-            className="flex items-center gap-2 text-xs"
-            style={{ color: "var(--accent)" }}
-          >
-            <span
-              className="w-1.5 h-1.5 rounded-full animate-pulse"
-              style={{ background: "var(--accent)" }}
-            />
-            Merging PR and creating release tag...
-          </div>
+          <StatusIndicator color="var(--accent)" text="Merging PR and creating release tag..." />
         )}
-
-        {/* Done */}
         {status.phase === "done" && (
           <div
             className="flex items-center gap-2 text-xs font-medium"
@@ -422,8 +432,6 @@ export function AutoPilotPanel({
             Complete
           </div>
         )}
-
-        {/* Error */}
         {status.error && (
           <div className="text-xs" style={{ color: "var(--error)" }}>
             Error: {status.error}
@@ -434,43 +442,44 @@ export function AutoPilotPanel({
   );
 }
 
-// --- Sub-components ---
+function StatusIndicator({ color, text }: { color: string; text: string }) {
+  return (
+    <div className="flex items-center gap-2 text-xs" style={{ color }}>
+      <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: color }} />
+      {text}
+    </div>
+  );
+}
 
-function PhaseStep({
-  label,
-  state,
-}: {
-  label: string;
-  state: "completed" | "active" | "pending";
-}) {
+function PhaseStep({ label, state }: { label: string; state: "completed" | "active" | "pending" }) {
   return (
     <span
-      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs whitespace-nowrap shrink-0"
+      className="inline-flex items-center gap-1.5 text-[10px] whitespace-nowrap shrink-0"
       style={{
+        padding: "6px 13px",
+        borderRadius: 7,
+        fontFamily: "var(--font-mono)",
         background:
           state === "active"
-            ? "rgba(99,102,241,0.12)"
+            ? "var(--stage-active-bg)"
             : state === "completed"
-              ? "rgba(34,197,94,0.08)"
-              : "var(--bg-primary)",
+              ? "var(--stage-done-bg)"
+              : "transparent",
         color:
           state === "active"
             ? "var(--accent)"
             : state === "completed"
-              ? "var(--success)"
-              : "var(--text-secondary)",
-        border:
-          state === "active"
-            ? "1px solid var(--accent)"
-            : "1px solid transparent",
+              ? "var(--stage-done-color)"
+              : "var(--text-muted)",
+        border: state === "active" ? "1px solid var(--accent-border)" : "1px solid transparent",
         opacity: state === "pending" ? 0.4 : 1,
       }}
     >
       {state === "active" && (
-        <span
-          className="w-1.5 h-1.5 rounded-full animate-pulse shrink-0"
-          style={{ background: "var(--accent)" }}
-        />
+        <span className="w-1.5 h-1.5 rounded-full animate-pulse shrink-0" style={{ background: "var(--accent)" }} />
+      )}
+      {state === "completed" && (
+        <span className="text-[7px] opacity-60">{"\u2713"}</span>
       )}
       {label}
     </span>
@@ -479,66 +488,47 @@ function PhaseStep({
 
 function PhaseArrow() {
   return (
-    <svg
-      width="16"
-      height="10"
-      viewBox="0 0 16 10"
-      fill="none"
-      className="shrink-0"
-      style={{ color: "var(--border)" }}
-    >
-      <path
-        d="M0 5h12m0 0L8.5 1.5M12 5L8.5 8.5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width="18" height="8" viewBox="0 0 18 8" className="shrink-0" style={{ margin: "0 1px" }}>
+      <line x1="2" y1="4" x2="13" y2="4" stroke="var(--stage-arrow-line)" strokeWidth="0.8" />
+      <polygon points="12,2.5 15,4 12,5.5" fill="var(--stage-arrow-head)" />
     </svg>
   );
 }
 
-function AgentWorkflow({
-  label,
-  workflow,
-}: {
-  label: string;
-  workflow: { stages: WorkflowStage[] };
-}) {
+function formatElapsed(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+
+function AgentWorkflow({ label, workflow }: { label: string; workflow: { stages: WorkflowStage[] } }) {
   return (
     <div className="flex items-center gap-3">
       <span
         className="text-xs font-medium shrink-0 w-16"
-        style={{ color: "var(--text-secondary)" }}
+        style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}
       >
         {label}
       </span>
-      <div className="flex items-center gap-1 overflow-x-auto">
+      <div className="flex items-center gap-0.5 overflow-x-auto">
         {workflow.stages.map((stage, i) => (
           <Fragment key={i}>
             {i > 0 && <PhaseArrow />}
             <span
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 text-[10px] whitespace-nowrap shrink-0"
               style={{
-                background:
-                  stage.status === "active"
-                    ? "rgba(99,102,241,0.12)"
-                    : "var(--bg-primary)",
-                color:
-                  stage.status === "active"
-                    ? "var(--accent)"
-                    : "var(--text-secondary)",
-                border:
-                  stage.status === "active"
-                    ? "1px solid var(--accent)"
-                    : "1px solid transparent",
+                padding: "6px 13px",
+                borderRadius: 7,
+                fontFamily: "var(--font-mono)",
+                background: stage.status === "active" ? "var(--stage-active-bg)" : "transparent",
+                color: stage.status === "active" ? "var(--accent)" : "var(--stage-pending-color)",
+                border: stage.status === "active" ? "1px solid var(--accent-border)" : "1px solid transparent",
               }}
             >
               {stage.status === "active" && (
-                <span
-                  className="w-1.5 h-1.5 rounded-full animate-pulse shrink-0"
-                  style={{ background: "var(--accent)" }}
-                />
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse shrink-0" style={{ background: "var(--accent)" }} />
               )}
               {stage.name}
               {stage.count && stage.count > 1 && (

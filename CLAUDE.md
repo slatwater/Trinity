@@ -28,11 +28,13 @@ src/
 │   └── api/projects/route.ts     # 扫描本地项目（唯一 Node API）
 ├── components/
 │   ├── ChatWindow.tsx            # 聊天窗口（SSE 流式）
-│   ├── ProjectCard.tsx           # 项目卡片（状态徽标）
-│   ├── MessageBubble.tsx         # 消息气泡
+│   ├── ProjectCard.tsx           # 项目卡片（状态徽标 + 迷你开关）
+│   ├── MessageBubble.tsx         # 消息气泡（markdown 渲染）
+│   ├── ClaudeMdModal.tsx         # CLAUDE.md 查看弹窗
+│   ├── ThemeToggle.tsx           # 深色/浅色主题切换开关
 │   ├── WorkflowMonitor.tsx       # 工作流可视化（阶段节点 + 箭头）
 │   ├── AutoPilotModal.tsx        # Auto Pilot 启动弹窗（选项目+需求）
-│   └── AutoPilotPanel.tsx        # Auto Pilot 状态面板（阶段条+聊天+工作流）
+│   └── AutoPilotPanel.tsx        # Auto Pilot 状态面板（阶段条+聊天+工作流+计时器）
 ├── lib/
 │   ├── projects.ts               # 项目扫描器
 │   └── types.ts                  # 类型定义
@@ -65,7 +67,7 @@ backend/
 
 ## 代码规范
 
-- 前端组件用 "use client"，CSS 变量在 globals.css，`TRINITY_WORKSPACE` 默认 `~/Projects/`
+- "use client" 组件，CSS 变量主题化（globals.css），`[data-theme="light"]` 覆盖，localStorage 持久化
 
 ## 关键设计决策
 

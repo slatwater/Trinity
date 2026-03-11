@@ -2,10 +2,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { ProjectCard } from "@/components/ProjectCard";
+import { ClaudeMdModal } from "@/components/ClaudeMdModal";
 import { WorkflowMonitor } from "@/components/WorkflowMonitor";
 import { AutoPilotModal } from "@/components/AutoPilotModal";
 import { AutoPilotPanel } from "@/components/AutoPilotPanel";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Project } from "@/lib/types";
+
+const ACCENT_COLORS = ["#d4a574", "#7aacbf", "#a87abf", "#7abf8e"];
 
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -15,6 +19,7 @@ export default function Home() {
   const [statuses, setStatuses] = useState<Record<string, "busy" | "idle">>({});
   const [showModal, setShowModal] = useState(false);
   const [autopilotId, setAutopilotId] = useState<string | null>(null);
+  const [claudeMdProject, setClaudeMdProject] = useState<Project | null>(null);
 
   useEffect(() => {
     fetch("/api/projects")
@@ -52,48 +57,156 @@ export default function Home() {
   const filtered = projects.filter(
     (p) =>
       p.name.toLowerCase().includes(filter.toLowerCase()) ||
-      p.language?.toLowerCase().includes(filter.toLowerCase())
+      p.version?.toLowerCase().includes(filter.toLowerCase())
   );
 
   return (
-    <div className="min-h-screen">
-      {/* Header */}
-      <header className="border-b px-8 py-5" style={{ borderColor: "var(--border)" }}>
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>
-              Trinity
-            </h1>
-            <p className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>
-              {workspace}
-            </p>
+    <div className="min-h-screen relative" style={{ padding: "0 48px 80px" }}>
+      {/* Ambient glows */}
+      <div
+        className="pointer-events-none absolute"
+        style={{
+          top: -100, left: -80, width: 500, height: 500,
+          background: "radial-gradient(circle, var(--ambient-warm) 0%, transparent 65%)",
+          filter: "blur(40px)",
+        }}
+      />
+      <div
+        className="pointer-events-none absolute"
+        style={{
+          bottom: -100, right: -80, width: 400, height: 400,
+          background: "radial-gradient(circle, var(--ambient-cool) 0%, transparent 65%)",
+          filter: "blur(40px)",
+        }}
+      />
+
+      <div
+        className="relative z-[1] mx-auto"
+        style={{ maxWidth: 1060, animation: "fadeUp 0.6s both" }}
+      >
+        {/* Header */}
+        <div style={{ padding: "52px 0 0" }}>
+          <div className="flex justify-between items-end">
+            <div>
+              <div className="flex items-center gap-2.5 mb-3.5">
+                <div
+                  className="text-[10px] px-3 py-1 rounded-[5px] font-semibold uppercase tracking-wider"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    background: "var(--accent-bg)",
+                    border: "1px solid var(--accent-border)",
+                    color: "var(--accent)",
+                    letterSpacing: "0.08em",
+                  }}
+                >
+                  Workspace
+                </div>
+                <span
+                  className="text-[10px]"
+                  style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}
+                >
+                  {workspace}
+                </span>
+              </div>
+              <h1
+                className="text-[52px] font-light m-0 leading-none"
+                style={{
+                  color: "var(--text-primary)",
+                  letterSpacing: "-0.04em",
+                  fontFamily: "var(--font-serif)",
+                }}
+              >
+                Trinity
+              </h1>
+            </div>
+            <div className="flex items-center gap-2.5 mb-1.5">
+              <ThemeToggle />
+              <button
+                onClick={() => {
+                  const el = document.getElementById("filter-input");
+                  if (el) el.focus();
+                }}
+                className="flex items-center gap-2 cursor-pointer transition-all duration-300"
+                style={{
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  borderRadius: 10,
+                  padding: "11px 20px",
+                  color: "var(--text-muted)",
+                  fontSize: 12,
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.35-4.35" />
+                </svg>
+                Filter
+              </button>
+              <button
+                onClick={() => setShowModal(true)}
+                className="cursor-pointer font-bold transition-all duration-300"
+                style={{
+                  background: "linear-gradient(135deg, var(--accent), var(--accent-hover))",
+                  color: "var(--accent-text-on)",
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "11px 28px",
+                  fontSize: 12,
+                  boxShadow: "var(--accent-shadow)",
+                }}
+              >
+                Auto Pilot
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowModal(true)}
-              className="px-4 py-2 rounded-lg text-sm font-medium"
-              style={{ background: "var(--accent)", color: "#fff" }}
-            >
-              Auto Pilot
-            </button>
-            <input
-              type="text"
-              placeholder="Filter projects..."
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="px-4 py-2 rounded-lg text-sm outline-none w-64"
+
+          {/* Filter input (hidden, revealed by focus) */}
+          <input
+            id="filter-input"
+            type="text"
+            placeholder="Search projects..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="outline-none transition-all duration-300 mt-4"
+            style={{
+              width: filter ? "100%" : 0,
+              maxWidth: 300,
+              opacity: filter ? 1 : 0,
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              padding: filter ? "8px 16px" : "0",
+              color: "var(--text-primary)",
+              fontSize: 13,
+              fontFamily: "var(--font-mono)",
+            }}
+            onFocus={(e) => {
+              e.target.style.width = "100%";
+              e.target.style.opacity = "1";
+              e.target.style.padding = "8px 16px";
+            }}
+            onBlur={(e) => {
+              if (!filter) {
+                e.target.style.width = "0";
+                e.target.style.opacity = "0";
+                e.target.style.padding = "0";
+              }
+            }}
+          />
+
+          {/* Animated divider */}
+          <div className="relative" style={{ marginTop: 32, height: 1 }}>
+            <div
+              className="absolute left-0 top-0 h-px"
               style={{
-                background: "var(--bg-secondary)",
-                color: "var(--text-primary)",
-                border: "1px solid var(--border)",
+                background: `linear-gradient(90deg, var(--accent), var(--accent-border) 40%, var(--divider-end) 70%)`,
+                animation: "lineGrow 1.2s cubic-bezier(0.16,1,0.3,1) both",
               }}
             />
           </div>
         </div>
-      </header>
 
-      {/* Project Grid */}
-      <main className="max-w-6xl mx-auto px-8 py-8">
+        {/* Bento Grid */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
             <div className="text-sm" style={{ color: "var(--text-secondary)" }}>
@@ -110,21 +223,33 @@ export default function Home() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((project) => (
+          <div
+            className="gap-2.5"
+            style={{
+              display: "grid",
+              gridTemplateColumns: filtered.length === 1 ? "1fr" : "1.35fr 1fr",
+              gridAutoRows: "minmax(210px, auto)",
+              marginTop: 40,
+              marginBottom: 48,
+            }}
+          >
+            {filtered.map((project, i) => (
               <ProjectCard
                 key={project.id}
                 project={project}
                 status={statuses[project.id] || "idle"}
+                accentColor={ACCENT_COLORS[i % ACCENT_COLORS.length]}
+                index={i}
                 onClick={() => {
                   window.location.href = `/project/${project.id}`;
                 }}
+                onClaudeMdClick={() => setClaudeMdProject(project)}
               />
             ))}
           </div>
         )}
 
-        <WorkflowMonitor projects={projects} />
+        <WorkflowMonitor projects={projects} statuses={statuses} />
 
         {autopilotId && (
           <AutoPilotPanel
@@ -132,7 +257,14 @@ export default function Home() {
             onClose={() => setAutopilotId(null)}
           />
         )}
-      </main>
+      </div>
+
+      {claudeMdProject && (
+        <ClaudeMdModal
+          project={claudeMdProject}
+          onClose={() => setClaudeMdProject(null)}
+        />
+      )}
 
       {showModal && (
         <AutoPilotModal
