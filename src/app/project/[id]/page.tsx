@@ -66,34 +66,15 @@ export default function ProjectPage() {
 
   return (
     <div className="flex flex-col h-screen" style={{ fontFamily: "var(--font-sans)" }}>
-      {/* Top Bar */}
+      {/* Top Bar — left zone reserved for traffic lights */}
       <header
-        className="flex items-center justify-between shrink-0"
+        className="flex items-center justify-between shrink-0 drag"
         style={{
-          padding: "16px 32px",
+          padding: "16px 32px 16px 88px",
           borderBottom: "1px solid var(--border-subtle)",
         }}
       >
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => router.push("/")}
-            className="flex items-center gap-1.5 cursor-pointer transition-colors duration-300"
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--text-muted)",
-              fontSize: 13,
-              fontFamily: "var(--font-mono)",
-              padding: 0,
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
-          >
-            <span style={{ fontSize: 16 }}>&larr;</span> Back
-          </button>
-
-          <div style={{ width: 1, height: 20, background: "var(--border)" }} />
-
+        <div className="flex items-center gap-4 no-drag">
           <div className="flex items-center gap-2.5">
             <div
               className="rounded-full shrink-0"
@@ -112,7 +93,7 @@ export default function ProjectPage() {
               <span
                 className="text-[10px] px-2 py-0.5 rounded"
                 style={{
-                  color: "var(--text-muted)",
+                  color: "var(--text-secondary)",
                   fontFamily: "var(--font-mono)",
                   background: "var(--accent-bg)",
                   border: "1px solid var(--accent-border)",
@@ -122,6 +103,25 @@ export default function ProjectPage() {
               </span>
             )}
           </div>
+
+          <div style={{ width: 1, height: 20, background: "var(--border)" }} />
+
+          <button
+            onClick={() => router.push("/")}
+            className="flex items-center gap-1.5 cursor-pointer transition-colors duration-300"
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--text-secondary)",
+              fontSize: 13,
+              fontFamily: "var(--font-mono)",
+              padding: 0,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--accent)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-secondary)")}
+          >
+            <span style={{ fontSize: 16 }}>&larr;</span> Back
+          </button>
         </div>
 
         <button
@@ -133,13 +133,13 @@ export default function ProjectPage() {
             });
             useChatStore.getState().clearSession(project.id);
           }}
-          className="cursor-pointer transition-all duration-300"
+          className="cursor-pointer transition-all duration-300 no-drag"
           style={{
             background: "var(--bg-tertiary)",
             border: "1px solid var(--border)",
             borderRadius: 10,
             padding: "7px 18px",
-            color: "var(--text-muted)",
+            color: "var(--text-secondary)",
             fontSize: 12,
             fontFamily: "var(--font-mono)",
           }}

@@ -84,9 +84,9 @@ export default function Home() {
         className="relative z-[1] mx-auto"
         style={{ maxWidth: 1060, animation: "fadeUp 0.6s both" }}
       >
-        {/* Header */}
-        <div style={{ padding: "52px 0 0" }}>
-          <div className="flex justify-between items-end">
+        {/* Header — top padding is drag region for window moving */}
+        <div className="drag" style={{ padding: "52px 0 0" }}>
+          <div className="flex justify-between items-end no-drag">
             <div>
               <div className="flex items-center gap-2.5 mb-3.5">
                 <div

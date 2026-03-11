@@ -1,11 +1,12 @@
 # Trinity
 
-Claude Code 本地开发流程可视化客户端 + Auto Pilot 全自动开发模式。
+Claude Code 本地开发流程可视化客户端 + Auto Pilot 全自动开发模式。支持 Electron 桌面应用（macOS）。
 
 ## 架构
 
 - **前端**: Next.js 15 (App Router) + TypeScript + Tailwind CSS v4 + Zustand
 - **后端**: Elixir/Phoenix API (port 4000) + ClaudeAgentSDK
+- **桌面**: Electron（hiddenInset 标题栏 + 内嵌 Elixir release + Next.js standalone）
 - Next.js 通过 `next.config.ts` rewrites 代理所有 `/api/*` 到 Elixir 后端
 - 每个项目一个持久化 Claude 进程（GenServer），多轮对话共享上下文
 - **Auto Pilot**: 双 Agent 编排器，状态机驱动全自动开发流程（澄清→规格→测试→合入→编码→CI→修复→发布）
@@ -13,9 +14,10 @@ Claude Code 本地开发流程可视化客户端 + Auto Pilot 全自动开发模
 ## 开发命令
 
 ```bash
-cd /Users/sevenstars/Projects/trinity
-./start.sh              # 同时启动前端(:3000) + 后端(:4000)
-# 或分别启动：npm run dev / cd backend && mix phx.server
+cd /Users/sevenstars/Projects/Trinity
+npm run dev             # Electron 桌面模式（启动前端+后端+窗口）
+npm run dev:web         # 纯浏览器模式（start.sh）
+npm run deploy          # 一键构建并安装到 /Applications
 ```
 
 ## 工程索引
@@ -53,6 +55,9 @@ backend/
     ├── session_controller.ex     # 会话/消息/工作流查询
     ├── auto_pilot_controller.ex  # Auto Pilot 5 个 API 端点
     └── router.ex                 # 路由
+electron/
+├── main.ts                    # Electron 主进程（进程管理 + 窗口创建）
+└── preload.ts                 # 预加载脚本
 ```
 
 ## Auto Pilot API
@@ -65,16 +70,10 @@ backend/
 | `POST /api/autopilot/:id/confirm` | 确认规格，触发 Agent B 写测试 |
 | `DELETE /api/autopilot/:id` | 取消 |
 
-## 代码规范
-
-- "use client" 组件，CSS 变量主题化（globals.css），`[data-theme="light"]` 覆盖，localStorage 持久化
-
 ## 关键设计决策
 
+- "use client" 组件，CSS 变量主题化，`[data-theme="light"]` 覆盖，localStorage 持久化
 - ClaudeAgentSDK：`model: "opus"` + `effort: :high` + `preset: :claude_code` + `bypassPermissions`
 - SSE 流通过 PubSub 广播，每次请求唯一 topic 防止事件串线
-- Auto Pilot 编排：Task 异步调用 ClaudeSession + wait_for_idle 轮询完成
-- CI 监控：`gh pr checks --json state` 轮询，失败日志直传 Agent A 修复
-- CI 通过后自动合并 PR + 打语义化版本 tag
-- Agent B 只修改已有测试文件，不新建，防止测试文件膨胀
-- 澄清阶段 prompt 强约束：禁止工具调用，仅允许提问
+- Auto Pilot：Task 异步 + wait_for_idle，CI 轮询 + 失败自动修复，通过后合并+打 tag
+- Electron：hiddenInset 标题栏，CSS `.drag`/`.no-drag`，Elixir release + Next.js standalone 内嵌

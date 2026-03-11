@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Electron window drag */
+.drag { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
 :root {
   /* Backgrounds */
   --bg-primary: #100f0e;
@@ -14,10 +18,10 @@
 
   /* Text */
   --text-primary: #f7f5f2;
-  --text-secondary: #999690;
-  --text-muted: #666460;
-  --text-dim: #3a3936;
-  --text-faint: #444440;
+  --text-secondary: #aaa8a4;
+  --text-muted: #7a7874;
+  --text-dim: #4a4846;
+  --text-faint: #555450;
   --text-card-title: #d0cec8;
   --text-card-title-hover: #f2f0ed;
   --text-time: #2e2d2b;
@@ -47,10 +51,10 @@
 
   /* Bubbles */
   --user-bubble-bg: rgba(212,165,116,0.06);
-  --user-bubble-color: #d4c4b0;
+  --user-bubble-color: #e0d4c4;
   --user-bubble-border: rgba(212,165,116,0.1);
   --ai-bubble-bg: #151413;
-  --ai-bubble-color: #aaa8a2;
+  --ai-bubble-color: #ccc9c3;
   --ai-bubble-border: #1c1b1a;
   --ai-bubble-shadow: none;
   --system-bubble-bg: rgba(234,179,8,0.1);
@@ -95,8 +99,8 @@
   --toggle-idle-dot: #555;
 
   /* Clarify chat */
-  --clarify-user-color: #d4c4b0;
-  --clarify-ai-color: #aaa8a2;
+  --clarify-user-color: #e0d4c4;
+  --clarify-ai-color: #ccc9c3;
   --timer-bg: rgba(255,255,255,0.03);
   --timer-border: var(--border-subtle);
   --confirm-bg: rgba(34,197,94,0.1);

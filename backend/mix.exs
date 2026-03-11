@@ -9,7 +9,13 @@ defmodule Trinity.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
-      deps: deps()
+      deps: deps(),
+      releases: [
+        trinity: [
+          include_erts: true,
+          strip_beams: true
+        ]
+      ]
     ]
   end
 

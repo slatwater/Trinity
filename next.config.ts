@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: [],
+  output: "standalone",
+  devIndicators: false,
+  serverExternalPackages: ["electron"],
   async rewrites() {
     return [
       { source: "/api/chat", destination: "http://localhost:4000/api/chat" },
