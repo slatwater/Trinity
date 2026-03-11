@@ -4,6 +4,10 @@ defmodule Trinity.Application do
 
   @impl true
   def start(_type, _args) do
+    # Prevent Claude SDK nesting detection
+    System.delete_env("CLAUDECODE")
+    System.delete_env("CLAUDE_CODE_ENTRYPOINT")
+
     children = [
       TrinityWeb.Telemetry,
       {Phoenix.PubSub, name: Trinity.PubSub},

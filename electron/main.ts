@@ -1,9 +1,32 @@
 import { app, BrowserWindow, screen } from "electron";
-import { spawn, ChildProcess } from "child_process";
+import { spawn, execSync, ChildProcess } from "child_process";
 import path from "path";
 import http from "http";
 
 const isDev = !app.isPackaged;
+
+// Load user's shell environment (Finder launches with minimal env)
+function loadShellEnv(): Record<string, string> {
+  try {
+    const shell = process.env.SHELL || "/bin/zsh";
+    const output = execSync(`${shell} -ilc "env"`, {
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+    const env: Record<string, string> = {};
+    for (const line of output.split("\n")) {
+      const idx = line.indexOf("=");
+      if (idx > 0) {
+        env[line.slice(0, idx)] = line.slice(idx + 1);
+      }
+    }
+    return env;
+  } catch {
+    return { ...process.env } as Record<string, string>;
+  }
+}
+
+const shellEnv = loadShellEnv();
 
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess | null = null;
@@ -41,7 +64,7 @@ function waitForPort(port: number, timeout = 30000): Promise<void> {
 }
 
 function startBackend(): ChildProcess {
-  const env = { ...process.env };
+  const env = { ...shellEnv };
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_ENTRYPOINT;
 
@@ -71,7 +94,7 @@ function startFrontend(): ChildProcess {
   if (isDev) {
     return spawn("npx", ["next", "dev"], {
       cwd: path.join(__dirname, "..", ".."),
-      env: process.env,
+      env: shellEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
   }
@@ -79,7 +102,7 @@ function startFrontend(): ChildProcess {
   const serverJs = resourcePath("standalone", "server.js");
   return spawn(process.execPath, [serverJs], {
     env: {
-      ...process.env,
+      ...shellEnv,
       ELECTRON_RUN_AS_NODE: "1",
       PORT: String(FRONTEND_PORT),
       HOSTNAME: "localhost",
