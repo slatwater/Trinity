@@ -55,7 +55,7 @@ backend/
 │   ├── stage_mapper.ex           # 工具名 → 阶段标签
 │   └── stream_event_parser.ex    # SDK 事件 → SSE JSON
 ├── lib/trinity_web/controllers/  # chat / session / auto_pilot / news / router
-└── scripts/scrape_tweet.py       # Python/Scrapling 推特抓取
+└── scripts/scrape_tweet.py       # Python/Scrapling 推特抓取（Cookie 认证 + Google 翻译）
 electron/main.ts + preload.ts     # Electron 主进程 + 预加载
 ```
 
@@ -77,4 +77,4 @@ electron/main.ts + preload.ts     # Electron 主进程 + 预加载
 - SSE 流 PubSub 广播，每次请求唯一 topic；Auto Pilot Task 异步 + CI 轮询自动修复
 - Electron：hiddenInset 标题栏，`.drag`/`.no-drag`，内嵌 Elixir release + Next.js standalone
 - Config 页：树状展示真实路径，hooks/MCP 提取为独立节点，编辑后合并写回
-- News 页：Python/Scrapling 抓推特 → Sonnet 4.6 总结，每日 8 点定时，数据存 `~/.trinity/news/`
+- News 页：Cookie 认证抓推特 → Google 翻译中文 → Sonnet 4.6 总结，过滤回复/转推/置顶，数据存 `~/.trinity/news/`

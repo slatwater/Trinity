@@ -208,7 +208,8 @@ defmodule Trinity.NewsFetcher do
     script = script_path()
 
     case System.cmd("python3", [script, username],
-           env: [{"PYTHONIOENCODING", "utf-8"}]
+           env: Map.to_list(Map.put(System.get_env() |> Map.new(), "PYTHONIOENCODING", "utf-8")),
+           stderr_to_stdout: true
          ) do
       {output, 0} ->
         # Take only the last line (JSON), skip any log lines
@@ -273,6 +274,8 @@ defmodule Trinity.NewsFetcher do
 
   defp call_sonnet(prompt) do
     Logger.info("[NewsFetcher] Calling Sonnet 4.6 for summarization...")
+    # Prevent "nested session" error when launched from Claude Code or Electron
+    System.delete_env("CLAUDECODE")
 
     case ClaudeAgentSDK.Streaming.start_session(%ClaudeAgentSDK.Options{
            model: "sonnet",
@@ -343,12 +346,19 @@ defmodule Trinity.NewsFetcher do
   defp display_name(other), do: other
 
   defp script_path do
-    [
-      Path.expand("scripts/scrape_tweet.py", File.cwd!()),
-      Path.expand("backend/scripts/scrape_tweet.py", File.cwd!())
-    ]
-    |> Enum.find(fn p -> File.exists?(p) end)
-    |> Kernel.||(Path.expand("scripts/scrape_tweet.py", File.cwd!()))
+    candidates =
+      case System.get_env("RELEASE_ROOT") do
+        nil -> []
+        root -> [Path.join(root, "../scripts/scrape_tweet.py") |> Path.expand()]
+      end ++
+      [
+        Path.expand("scripts/scrape_tweet.py", File.cwd!()),
+        Path.expand("backend/scripts/scrape_tweet.py", File.cwd!())
+      ]
+
+    found = Enum.find(candidates, fn p -> File.exists?(p) end)
+    Logger.info("[NewsFetcher] Script candidates: #{inspect(candidates)}, found: #{inspect(found)}")
+    found || List.first(candidates)
   end
 
   defp data_dir, do: Path.join(System.user_home!(), ".trinity/news")

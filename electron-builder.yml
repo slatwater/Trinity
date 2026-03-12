@@ -51,3 +51,8 @@ extraResources:
     to: standalone/.next/static
     filter:
       - "**/*"
+  # Python scripts
+  - from: backend/scripts
+    to: scripts
+    filter:
+      - "**/*"
