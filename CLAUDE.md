@@ -25,18 +25,23 @@ npm run deploy          # 一键构建并安装到 /Applications
 ```
 src/
 ├── app/
-│   ├── page.tsx                  # 首页（项目仪表盘 + Auto Pilot 入口）
+│   ├── page.tsx                  # Code 首页（项目仪表盘 + Auto Pilot 入口）
+│   ├── config/page.tsx           # Config 页（全局+项目配置树 + 编辑器）
+│   ├── news/page.tsx             # News 页（占位）
 │   ├── project/[id]/page.tsx     # 项目聊天页
-│   └── api/projects/route.ts     # 扫描本地项目（唯一 Node API）
+│   ├── api/projects/route.ts     # 扫描本地项目
+│   └── api/config/route.ts       # 配置读写 API（GET/PUT/POST）
 ├── components/
+│   ├── Sidebar.tsx               # 左侧导航栏（Code/Config/News）
+│   ├── ConfigEditor.tsx          # 配置文件编辑 Modal
 │   ├── ChatWindow.tsx            # 聊天窗口（SSE 流式）
-│   ├── ProjectCard.tsx           # 项目卡片（状态徽标 + 迷你开关）
+│   ├── ProjectCard.tsx           # 项目卡片（状态徽标）
 │   ├── MessageBubble.tsx         # 消息气泡（markdown 渲染）
 │   ├── ClaudeMdModal.tsx         # CLAUDE.md 查看弹窗
-│   ├── ThemeToggle.tsx           # 深色/浅色主题切换开关
-│   ├── WorkflowMonitor.tsx       # 工作流可视化（阶段节点 + 箭头）
-│   ├── AutoPilotModal.tsx        # Auto Pilot 启动弹窗（选项目+需求）
-│   └── AutoPilotPanel.tsx        # Auto Pilot 状态面板（阶段条+聊天+工作流+计时器）
+│   ├── ThemeToggle.tsx           # 深色/浅色主题切换
+│   ├── WorkflowMonitor.tsx       # 工作流可视化
+│   ├── AutoPilotModal.tsx        # Auto Pilot 启动弹窗
+│   └── AutoPilotPanel.tsx        # Auto Pilot 状态面板
 ├── lib/
 │   ├── projects.ts               # 项目扫描器
 │   └── types.ts                  # 类型定义
@@ -45,16 +50,12 @@ src/
 
 backend/
 ├── lib/trinity/
-│   ├── application.ex            # 监督树（Session/AutoPilot Registry + DynamicSupervisor）
-│   ├── claude_session.ex         # GenServer：Claude 进程管理 + 工作流追踪
+│   ├── application.ex            # 监督树
+│   ├── claude_session.ex         # GenServer：Claude 进程 + 工作流追踪
 │   ├── auto_pilot.ex             # GenServer：双 Agent 编排器（状态机）
 │   ├── stage_mapper.ex           # 工具名 → 阶段标签
 │   └── stream_event_parser.ex    # SDK 事件 → SSE JSON
-└── lib/trinity_web/controllers/
-    ├── chat_controller.ex        # POST /api/chat → SSE
-    ├── session_controller.ex     # 会话/消息/工作流查询
-    ├── auto_pilot_controller.ex  # Auto Pilot 5 个 API 端点
-    └── router.ex                 # 路由
+└── lib/trinity_web/controllers/  # chat / session / auto_pilot / router
 electron/
 ├── main.ts                    # Electron 主进程（进程管理 + 窗口创建）
 └── preload.ts                 # 预加载脚本
@@ -72,8 +73,8 @@ electron/
 
 ## 关键设计决策
 
-- "use client" 组件，CSS 变量主题化，`[data-theme="light"]` 覆盖，localStorage 持久化
+- CSS 变量主题化，`[data-theme="light"]` + localStorage；Sidebar 导航 68px 固定宽度
 - ClaudeAgentSDK：`model: "opus"` + `effort: :high` + `preset: :claude_code` + `bypassPermissions`
-- SSE 流通过 PubSub 广播，每次请求唯一 topic 防止事件串线
-- Auto Pilot：Task 异步 + wait_for_idle，CI 轮询 + 失败自动修复，通过后合并+打 tag
-- Electron：hiddenInset 标题栏，CSS `.drag`/`.no-drag`，Elixir release + Next.js standalone（utilityProcess）内嵌
+- SSE 流 PubSub 广播，每次请求唯一 topic；Auto Pilot Task 异步 + CI 轮询自动修复
+- Electron：hiddenInset 标题栏，`.drag`/`.no-drag`，内嵌 Elixir release + Next.js standalone
+- Config 页：树状展示真实路径，hooks/MCP 从 settings.json 提取为独立节点，编辑后合并写回

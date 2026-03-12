@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, JetBrains_Mono, Playfair_Display } from "next/font/google";
+import { Sidebar } from "@/components/Sidebar";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -31,7 +32,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: `(function(){try{var t=localStorage.getItem("trinity-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})()` }} />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased flex">
+        <Sidebar />
+        <main className="flex-1 min-w-0">{children}</main>
+      </body>
     </html>
   );
 }

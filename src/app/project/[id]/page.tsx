@@ -70,7 +70,7 @@ export default function ProjectPage() {
       <header
         className="flex items-center justify-between shrink-0 drag"
         style={{
-          padding: "16px 32px 16px 88px",
+          padding: "16px 32px 16px 24px",
           borderBottom: "1px solid var(--border-subtle)",
         }}
       >
