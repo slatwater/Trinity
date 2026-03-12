@@ -14,6 +14,9 @@ const nextConfig: NextConfig = {
       { source: "/api/autopilot/:id/confirm", destination: "http://localhost:4000/api/autopilot/:id/confirm" },
       { source: "/api/autopilot/:id", destination: "http://localhost:4000/api/autopilot/:id" },
       { source: "/api/autopilot", destination: "http://localhost:4000/api/autopilot" },
+      { source: "/api/news/refresh", destination: "http://localhost:4000/api/news/refresh" },
+      { source: "/api/news/config", destination: "http://localhost:4000/api/news/config" },
+      { source: "/api/news", destination: "http://localhost:4000/api/news" },
     ];
   },
 };

@@ -37,6 +37,36 @@ export interface ProjectWorkflow {
   stages: WorkflowStage[];
 }
 
+// ── News ──
+
+export interface TweetData {
+  ok: boolean;
+  username?: string;
+  text?: string;
+  timestamp?: string;
+  url?: string;
+  error?: string;
+}
+
+export interface NewsCategoryData {
+  summary: string;
+  tweets: TweetData[];
+}
+
+export interface NewsData {
+  date: string;
+  fetched_at: string;
+  categories: Record<string, NewsCategoryData>;
+}
+
+export interface NewsConfig {
+  claude: string[];
+  openai: string[];
+  gemini: string[];
+}
+
+// ── Auto Pilot ──
+
 export type AutoPilotPhase =
   | "clarifying"
   | "generating_spec"

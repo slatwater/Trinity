@@ -15,6 +15,7 @@ defmodule Trinity.Application do
       {Registry, keys: :unique, name: Trinity.AutoPilotRegistry},
       {DynamicSupervisor, name: Trinity.SessionManager, strategy: :one_for_one},
       {DynamicSupervisor, name: Trinity.AutoPilotManager, strategy: :one_for_one},
+      Trinity.NewsFetcher,
       TrinityWeb.Endpoint
     ]
 
