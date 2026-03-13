@@ -44,14 +44,65 @@ def make_page_action(cookies):
 
 
 def translate_to_chinese(text: str) -> str:
-    """Translate text to Chinese via Google Translate."""
+    """Translate text to Chinese via Google Translate, preserving @mentions and URLs."""
     if not text:
         return text
     try:
+        import re
         from deep_translator import GoogleTranslator
-        return GoogleTranslator(source="auto", target="zh-CN").translate(text)
+
+        # Extract @mentions and URLs, replace with indexed placeholders
+        tokens = re.findall(r'@\w+|https?://\S+', text)
+        preserved = text
+        placeholders = {}
+        for i, token in enumerate(tokens):
+            ph = f"{{{{#{i}#}}}}"
+            placeholders[ph] = token
+            preserved = preserved.replace(token, ph, 1)
+
+        translated = GoogleTranslator(source="auto", target="zh-CN").translate(preserved)
+
+        for ph, token in placeholders.items():
+            translated = translated.replace(ph, token)
+
+        return translated
     except Exception:
         return text
+
+
+def extract_text(el):
+    """Extract full text from tweetText element, recursively handling nested links."""
+    parts = []
+    _walk(el, parts)
+    return ' '.join(p for p in parts if p).strip()
+
+
+def _walk(el, parts):
+    tag = getattr(el, 'tag', '')
+    if tag == 'a':
+        # For <a> tags: prefer direct text, then title/href, don't recurse
+        text = el.text
+        title = el.attrib.get('title', '')
+        href = el.attrib.get('href', '')
+        if text and text != 'None':
+            parts.append(text)
+        elif title and title.startswith('http'):
+            parts.append(title)
+        elif href.startswith('/') and not href.startswith('/i/'):
+            username = href.strip('/').split('/')[0]
+            if username:
+                parts.append(f'@{username}')
+        elif href.startswith('http'):
+            parts.append(href)
+        return
+
+    text = el.text
+    if text and text != 'None':
+        parts.append(text)
+
+    if hasattr(el, 'children'):
+        for child in el.children:
+            _walk(child, parts)
 
 
 def scrape_latest_tweet(username: str) -> dict:
@@ -107,8 +158,7 @@ def scrape_latest_tweet(username: str) -> dict:
 
             text_el = tweet.css('[data-testid="tweetText"]')
             if text_el:
-                spans = text_el[0].css("span")
-                text = " ".join(s.text for s in spans if s.text)
+                text = extract_text(text_el[0])
             else:
                 text = ""
 
