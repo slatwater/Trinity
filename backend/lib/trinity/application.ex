@@ -13,8 +13,10 @@ defmodule Trinity.Application do
       {Phoenix.PubSub, name: Trinity.PubSub},
       {Registry, keys: :unique, name: Trinity.SessionRegistry},
       {Registry, keys: :unique, name: Trinity.AutoPilotRegistry},
+      {Registry, keys: :unique, name: Trinity.EvolveLabRegistry},
       {DynamicSupervisor, name: Trinity.SessionManager, strategy: :one_for_one},
       {DynamicSupervisor, name: Trinity.AutoPilotManager, strategy: :one_for_one},
+      {DynamicSupervisor, name: Trinity.EvolveLabManager, strategy: :one_for_one},
       Trinity.NewsFetcher,
       TrinityWeb.Endpoint
     ]

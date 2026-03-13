@@ -20,6 +20,9 @@ defmodule TrinityWeb.Router do
     post "/autopilot/:id/confirm", AutoPilotController, :confirm
     delete "/autopilot/:id", AutoPilotController, :delete
 
+    post "/evolvelab", EvolveLabController, :create
+    delete "/evolvelab/:id", EvolveLabController, :delete
+
     get "/news", NewsController, :index
     post "/news/refresh", NewsController, :refresh
     put "/news/config", NewsController, :update_config

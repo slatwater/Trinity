@@ -36,6 +36,7 @@ defmodule Trinity.MixProject do
       {:bandit, "~> 1.5"},
       {:claude_agent_sdk, "~> 0.15"},
       {:cors_plug, "~> 3.0"},
+      {:req, "~> 0.5"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"}
     ]
