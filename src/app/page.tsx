@@ -6,7 +6,7 @@ import { ClaudeMdModal } from "@/components/ClaudeMdModal";
 import { WorkflowMonitor } from "@/components/WorkflowMonitor";
 import { AutoPilotModal } from "@/components/AutoPilotModal";
 import { AutoPilotPanel } from "@/components/AutoPilotPanel";
-import { ThemeToggle } from "@/components/ThemeToggle";
+
 import { Project } from "@/lib/types";
 
 const ACCENT_COLORS = ["#d4a574", "#7aacbf", "#a87abf", "#7abf8e"];
@@ -120,7 +120,6 @@ export default function Home() {
               </h1>
             </div>
             <div className="flex items-center gap-2.5 mb-1.5">
-              <ThemeToggle />
               <button
                 onClick={() => {
                   const el = document.getElementById("filter-input");

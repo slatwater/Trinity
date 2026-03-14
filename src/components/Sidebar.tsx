@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
+import { ThemeToggle } from "./ThemeToggle";
 
 type NavItem = {
   key: string;
@@ -167,6 +168,11 @@ export function Sidebar() {
 
       {/* Spacer bottom */}
       <div className="flex-1" />
+
+      {/* Theme toggle */}
+      <div className="no-drag" style={{ paddingBottom: 16 }}>
+        <ThemeToggle />
+      </div>
     </aside>
   );
 }

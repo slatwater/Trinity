@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   useEvolveLabStore,
   MODEL_PRESETS,
@@ -1878,103 +1879,87 @@ function AccuracyChart({ results, onNodeClick }: { results: ExperimentResult[]; 
 // ── DatasetModal ───────────────────────────────────────
 
 function DatasetModal({ name, items, onClose }: { name: string; items: { question: string; answer: string }[]; onClose: () => void }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
-      onMouseDown={onClose}
       style={{
-        position: "fixed",
-        top: 0, left: 0, right: 0, bottom: 0,
-        zIndex: 1000,
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "center",
-        paddingTop: 80,
-        paddingBottom: 40,
-        background: "rgba(0,0,0,0.5)",
-        backdropFilter: "blur(4px)",
+        position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+        zIndex: 9999,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "52px 16px 16px",
+        animation: "backdropIn 0.3s both",
       }}
     >
       <div
-        onMouseDown={(e) => e.stopPropagation()}
+        style={{ position: "absolute", inset: 0, background: "var(--overlay-bg)", backdropFilter: "var(--overlay-blur)" }}
+        onClick={onClose}
+      />
+      <div
+        onClick={(e) => e.stopPropagation()}
         style={{
-          width: "90%",
-          maxWidth: 800,
-          maxHeight: "calc(100vh - 120px)",
-          borderRadius: 16,
-          background: "var(--bg-primary)",
-          border: "1px solid var(--border-subtle)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+          position: "relative",
+          width: "100%", maxWidth: 680,
+          maxHeight: "calc(100vh - 68px)",
+          background: "var(--modal-bg)", border: "1px solid var(--border)",
+          borderRadius: 20, boxShadow: "var(--modal-shadow)",
+          display: "flex", flexDirection: "column", overflow: "hidden",
+          animation: "modalIn 0.45s 0.1s both cubic-bezier(0.16,1,0.3,1)",
         }}
       >
-        {/* Header */}
+        <div style={{ position: "absolute", top: 0, left: 32, right: 32, height: 1, background: `linear-gradient(90deg, transparent, var(--modal-purple-line), transparent)` }} />
+
         <div style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "16px 22px",
-          borderBottom: "1px solid var(--border-subtle)",
-          flexShrink: 0,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "20px 28px", borderBottom: "1px solid var(--border)", flexShrink: 0,
         }}>
-          <div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
-              {name}
-            </span>
-            <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 10, fontFamily: "var(--font-mono)" }}>
-              {items.length} questions
-            </span>
-          </div>
+          <h3 style={{ fontSize: 16, fontWeight: 400, color: "var(--text-primary)", fontFamily: "var(--font-serif)", margin: 0 }}>
+            {name}
+            <span style={{ marginLeft: 8, fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>{items.length} questions</span>
+          </h3>
           <button
             onClick={onClose}
             style={{
-              background: "none", border: "none", color: "var(--text-muted)",
-              fontSize: 18, cursor: "pointer", padding: "4px 8px", lineHeight: 1,
+              fontSize: 12, padding: "4px 10px", borderRadius: 6,
+              color: "var(--text-muted)", background: "var(--bg-tertiary)",
+              border: "1px solid var(--border)", fontFamily: "var(--font-mono)",
+              cursor: "pointer",
             }}
-          >
-            &#10005;
-          </button>
+          >ESC</button>
         </div>
 
-        {/* Scrollable body */}
-        <div style={{ overflow: "auto", padding: "16px 22px", flex: 1 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ overflow: "auto", padding: "16px 28px", flex: 1 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {items.map((item, i) => (
               <div key={i} style={{
-                padding: "14px 16px",
-                borderRadius: 10,
-                background: "var(--bg-secondary)",
-                border: "1px solid var(--border-subtle)",
-                fontSize: 12,
-                fontFamily: "var(--font-mono)",
-                lineHeight: 1.6,
+                padding: "12px 14px", borderRadius: 10,
+                background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)",
+                fontSize: 12, fontFamily: "var(--font-mono)", lineHeight: 1.6,
               }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
                   <span style={{
                     fontSize: 9, fontWeight: 700, color: "var(--accent)",
                     background: "var(--accent-bg)", padding: "2px 6px", borderRadius: 4,
                     letterSpacing: "0.04em", flexShrink: 0,
-                  }}>
-                    Q{i + 1}
-                  </span>
+                  }}>Q{i + 1}</span>
                   <span style={{ color: "var(--text-primary)" }}>{item.question}</span>
                 </div>
-                <div style={{ color: "var(--text-muted)", fontSize: 11, paddingLeft: 2 }}>
-                  {item.answer}
-                </div>
+                <div style={{ color: "var(--text-muted)", fontSize: 11, paddingLeft: 2 }}>{item.answer}</div>
               </div>
             ))}
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
