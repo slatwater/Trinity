@@ -29,6 +29,7 @@ src/
 │   ├── news/page.tsx             # News 页（推特新闻摘要 × 3 分类）
 │   ├── project/[id]/page.tsx     # 项目聊天页
 │   ├── api/evolvelab/route.ts    # EvolveLab SSE 流式代理
+│   ├── api/evolvelab/history/route.ts # 实验历史 CRUD API
 │   ├── api/projects/route.ts     # 扫描本地项目
 │   └── api/config/route.ts       # 配置读写 API（GET/PUT/POST）
 ├── components/
@@ -46,7 +47,8 @@ src/
 │   ├── projects.ts               # 项目扫描器
 │   └── types.ts                  # 类型定义
 └── stores/
-    └── chat.ts                   # Zustand 状态管理
+    ├── chat.ts                   # 聊天状态管理
+    └── evolvelab.ts              # EvolveLab 状态管理（类型 + SSE + 历史）
 
 backend/
 ├── lib/trinity/
@@ -67,8 +69,9 @@ electron/main.ts + preload.ts     # Electron 主进程 + 预加载
 | 路由 | 作用 |
 |------|------|
 | `POST/GET/DELETE /api/autopilot[/:id][/message\|confirm]` | Auto Pilot 全流程 |
-| `POST /api/evolvelab` | 启动 prompt 进化实验（SSE 流式） |
+| `POST /api/evolvelab` | 启动 prompt 进化实验（SSE 流式，支持 maxConcurrent 参数） |
 | `DELETE /api/evolvelab/:id` | 取消实验 |
+| `GET/POST/DELETE /api/evolvelab/history` | 实验历史记录（存储 `~/.trinity/evolvelab/`） |
 | `GET/POST/PUT /api/news[/*]` | 新闻数据 / 刷新 / 推特账号配置 |
 
 ## 关键设计决策
@@ -76,5 +79,5 @@ electron/main.ts + preload.ts     # Electron 主进程 + 预加载
 - CSS 变量主题化 `[data-theme="light"]` + localStorage；Sidebar 68px 上下分区布局
 - ClaudeAgentSDK：`model: "opus"` + `effort: :high` + `preset: :claude_code` + `bypassPermissions`
 - Electron：hiddenInset 标题栏，内嵌 Elixir release + Next.js standalone
-- EvolveLab：策略模型(SDK) 建议 prompt → 被测模型(API) 评测 200 题 → 比较保留最优
+- EvolveLab：策略模型(SDK) 建议 prompt → 被测模型(API) 并发评测 200 题（可调 1-50）→ 比较保留最优
 - News：Cookie 认证抓推特 → Google 翻译 → Sonnet 4.6 总结，数据存 `~/.trinity/news/`

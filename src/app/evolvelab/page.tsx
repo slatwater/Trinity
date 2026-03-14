@@ -1,257 +1,40 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
-
-// ── Types ───────────────────────────────────────────────
-
-interface ModelConfig {
-  presetId: string;
-  provider: string;
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-  sdkModel?: string;
-}
-
-interface ExperimentResult {
-  exp: number;
-  accuracy: number;
-  correct: string;
-  cost: number;
-  time_s: number;
-  status: "keep" | "discard" | "crash";
-  description: string;
-}
-
-interface PromptConfig {
-  system_prompt: string;
-  few_shot_examples: string[][];
-  format_instruction: string;
-}
-
-type Phase = "idle" | "starting" | "baseline" | "suggesting" | "evaluating" | "done" | "error";
-
-// ── Model Presets ───────────────────────────────────────
-
-interface ModelPreset {
-  id: string;
-  name: string;
-  provider: string;
-  model: string;
-  baseUrl: string;
-  sdkModel?: string;
-  strategyOnly?: boolean;
-}
-
-const MODEL_PRESETS: ModelPreset[] = [
-  // SDK models — use built-in ClaudeAgentSDK, no API key needed (strategy only)
-  { id: "sdk-sonnet", name: "Sonnet 4.6", provider: "sdk", sdkModel: "sonnet", model: "", baseUrl: "", strategyOnly: true },
-  { id: "sdk-haiku", name: "Haiku 4.5", provider: "sdk", sdkModel: "haiku", model: "", baseUrl: "", strategyOnly: true },
-  { id: "sdk-opus", name: "Opus 4.6", provider: "sdk", sdkModel: "opus", model: "", baseUrl: "", strategyOnly: true },
-  // API models — need API key
-  { id: "deepseek-chat", name: "DeepSeek V3", provider: "openai", model: "deepseek-chat", baseUrl: "https://api.deepseek.com" },
-  { id: "deepseek-reasoner", name: "DeepSeek R1", provider: "openai", model: "deepseek-reasoner", baseUrl: "https://api.deepseek.com" },
-  { id: "custom", name: "Custom", provider: "openai", model: "", baseUrl: "" },
-];
-
-// ── Constants ───────────────────────────────────────────
-
-const STORAGE_KEY = "trinity-evolvelab-config";
-
-const DEFAULT_STRATEGY: ModelConfig = {
-  presetId: "sdk-sonnet",
-  provider: "sdk",
-  sdkModel: "sonnet",
-  apiKey: "",
-  baseUrl: "",
-  model: "",
-};
-
-const DEFAULT_TARGET: ModelConfig = {
-  presetId: "deepseek-chat",
-  provider: "openai",
-  apiKey: "",
-  baseUrl: "https://api.deepseek.com",
-  model: "deepseek-chat",
-};
+import { useState, useEffect } from "react";
+import {
+  useEvolveLabStore,
+  MODEL_PRESETS,
+  type ModelConfig,
+  type ExperimentResult,
+  type PromptConfig,
+  type HistoryEntry,
+  type Phase,
+} from "@/stores/evolvelab";
 
 // ── Page ────────────────────────────────────────────────
 
 export default function EvolveLabPage() {
-  const [strategy, setStrategy] = useState<ModelConfig>(DEFAULT_STRATEGY);
-  const [target, setTarget] = useState<ModelConfig>(DEFAULT_TARGET);
-  const [numExperiments, setNumExperiments] = useState(5);
+  const store = useEvolveLabStore();
   const [showConfig, setShowConfig] = useState(true);
-
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [experimentId, setExperimentId] = useState<string | null>(null);
-  const [currentExp, setCurrentExp] = useState(0);
-  const [progress, setProgress] = useState({ completed: 0, total: 200, correct: 0 });
-  const [results, setResults] = useState<ExperimentResult[]>([]);
-  const [bestAccuracy, setBestAccuracy] = useState(0);
-  const [bestConfig, setBestConfig] = useState<PromptConfig | null>(null);
-  const [currentSuggestion, setCurrentSuggestion] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("experiments");
 
-  const abortRef = useRef<AbortController | null>(null);
-
-  // Load saved config
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const cfg = JSON.parse(saved);
-        if (cfg.strategy) setStrategy((s) => ({ ...s, ...cfg.strategy }));
-        if (cfg.target) setTarget((s) => ({ ...s, ...cfg.target }));
-      }
-    } catch {
-      /* ignore */
-    }
+    store.loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleEvent = useCallback((event: Record<string, unknown>) => {
-    switch (event.type) {
-      case "started":
-        setExperimentId(event.id as string);
-        break;
-      case "phase":
-        setPhase(event.phase as Phase);
-        setCurrentExp(event.exp as number);
-        setProgress({ completed: 0, total: 200, correct: 0 });
-        if (event.phase !== "suggesting") setCurrentSuggestion(null);
-        break;
-      case "progress":
-        setProgress({
-          completed: event.completed as number,
-          total: event.total as number,
-          correct: event.correct as number,
-        });
-        break;
-      case "suggestion":
-        setCurrentSuggestion(event.description as string);
-        break;
-      case "result": {
-        const r = event.result as ExperimentResult;
-        setResults((prev) => [...prev, r]);
-        if (r.status === "keep") setBestAccuracy(r.accuracy);
-        break;
-      }
-      case "done":
-        setPhase("done");
-        setBestAccuracy(event.best_accuracy as number);
-        setBestConfig(event.best_config as PromptConfig);
-        break;
-      case "error":
-        setPhase("error");
-        setError(event.message as string);
-        break;
-    }
-  }, []);
+  const {
+    strategy, target, numExperiments, maxConcurrency, phase, currentExp,
+    progress, results, bestAccuracy, bestConfig, currentSuggestion,
+    error, history, viewingHistory,
+    setStrategy, setTarget, setNumExperiments, setMaxConcurrency,
+    startExperiment, cancelExperiment,
+    viewHistory, closeHistory, deleteHistory,
+  } = store;
 
   const strategyReady = strategy.provider === "sdk" || !!strategy.apiKey;
   const targetReady = !!target.apiKey;
   const canStart = strategyReady && targetReady;
-
-  const handleStart = useCallback(async () => {
-    if (!canStart) return;
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ strategy, target }));
-
-    setPhase("starting");
-    setResults([]);
-    setBestAccuracy(0);
-    setBestConfig(null);
-    setError(null);
-    setCurrentSuggestion(null);
-    setShowConfig(false);
-    setActiveTab("experiments");
-
-    const abort = new AbortController();
-    abortRef.current = abort;
-
-    try {
-      const res = await fetch("/api/evolvelab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          strategy: {
-            provider: strategy.provider,
-            apiKey: strategy.apiKey,
-            baseUrl: strategy.baseUrl,
-            model: strategy.model,
-            sdkModel: strategy.sdkModel,
-          },
-          target: {
-            provider: target.provider,
-            apiKey: target.apiKey,
-            baseUrl: target.baseUrl,
-            model: target.model,
-          },
-          numExperiments,
-        }),
-        signal: abort.signal,
-      });
-
-      if (!res.ok) {
-        setPhase("error");
-        setError("Failed to start experiment");
-        return;
-      }
-
-      const reader = res.body?.getReader();
-      if (!reader) return;
-      const decoder = new TextDecoder();
-
-      let buf = "";
-      let done = false;
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (!value) continue;
-
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            handleEvent(JSON.parse(line.slice(6)));
-          } catch {
-            /* skip */
-          }
-        }
-      }
-
-      if (buf.startsWith("data: ")) {
-        try {
-          handleEvent(JSON.parse(buf.slice(6)));
-        } catch {
-          /* skip */
-        }
-      }
-    } catch (e) {
-      if ((e as Error).name !== "AbortError") {
-        setPhase("error");
-        setError((e as Error).message);
-      }
-    }
-  }, [strategy, target, numExperiments, handleEvent, canStart]);
-
-  const handleCancel = useCallback(() => {
-    abortRef.current?.abort();
-    if (experimentId) {
-      fetch(`/api/evolvelab/${experimentId}`, { method: "DELETE" }).catch(() => {});
-    }
-    setPhase("idle");
-  }, [experimentId]);
-
-  useEffect(() => {
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, []);
 
   const isRunning = phase !== "idle" && phase !== "done" && phase !== "error";
   const hasResults = results.length > 0;
@@ -260,6 +43,17 @@ export default function EvolveLabPage() {
 
   const strategyPreset = MODEL_PRESETS.find((p) => p.id === strategy.presetId);
   const targetPreset = MODEL_PRESETS.find((p) => p.id === target.presetId);
+
+  // Auto-collapse config when running
+  useEffect(() => {
+    if (isRunning) setShowConfig(false);
+  }, [isRunning]);
+
+  const handleStart = () => {
+    startExperiment();
+    setShowConfig(false);
+    setActiveTab("experiments");
+  };
 
   return (
     <div className="min-h-screen relative" style={{ padding: "0 48px 80px" }}>
@@ -297,7 +91,7 @@ export default function EvolveLabPage() {
                   RUNNING
                 </span>
               )}
-              {phase === "done" && <span style={badgeStyle}>COMPLETE</span>}
+              {phase === "done" && !viewingHistory && <span style={badgeStyle}>COMPLETE</span>}
             </div>
             <h1
               style={{
@@ -339,140 +133,230 @@ export default function EvolveLabPage() {
         </div>
 
         {/* Config Section */}
-        <div style={{ marginBottom: 32 }}>
-          <button
-            onClick={() => setShowConfig(!showConfig)}
-            style={{
-              background: "none",
-              border: "none",
-              color: "var(--text-secondary)",
-              fontSize: 13,
-              fontFamily: "var(--font-mono)",
-              cursor: "pointer",
-              padding: "4px 0",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <span
+        {!viewingHistory && (
+          <div style={{ marginBottom: 32 }}>
+            <button
+              onClick={() => setShowConfig(!showConfig)}
               style={{
-                display: "inline-block",
-                transform: showConfig ? "rotate(90deg)" : "rotate(0deg)",
-                transition: "transform 0.2s",
-                fontSize: 10,
+                background: "none",
+                border: "none",
+                color: "var(--text-secondary)",
+                fontSize: 13,
+                fontFamily: "var(--font-mono)",
+                cursor: "pointer",
+                padding: "4px 0",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
               }}
             >
-              &#9654;
-            </span>
-            Model Configuration
-            {!showConfig && (
-              <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 8 }}>
-                {strategyPreset?.name || strategy.model} → {targetPreset?.name || target.model}
-              </span>
-            )}
-          </button>
-
-          {showConfig && (
-            <div style={{ marginTop: 16, animation: "fadeUp 0.3s both" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-                <ModelConfigCard
-                  title="Strategy Model"
-                  subtitle="Analyzes results and generates optimization strategies"
-                  config={strategy}
-                  onChange={setStrategy}
-                  disabled={isRunning}
-                  accentColor="#d4a574"
-                  role="strategy"
-                />
-                <ModelConfigCard
-                  title="Target Model"
-                  subtitle="The model being optimized — answers math problems"
-                  config={target}
-                  onChange={setTarget}
-                  disabled={isRunning}
-                  accentColor="#8070a8"
-                  role="target"
-                />
-              </div>
-
-              <div
+              <span
                 style={{
-                  marginTop: 24,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 24,
+                  display: "inline-block",
+                  transform: showConfig ? "rotate(90deg)" : "rotate(0deg)",
+                  transition: "transform 0.2s",
+                  fontSize: 10,
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                    Rounds
-                  </span>
-                  <input
-                    type="range"
-                    min={1}
-                    max={30}
-                    value={numExperiments}
-                    onChange={(e) => setNumExperiments(parseInt(e.target.value))}
+                &#9654;
+              </span>
+              Model Configuration
+              {!showConfig && (
+                <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 8 }}>
+                  {strategyPreset?.name || strategy.model} &rarr; {targetPreset?.name || target.model}
+                </span>
+              )}
+            </button>
+
+            {showConfig && (
+              <div style={{ marginTop: 16, animation: "fadeUp 0.3s both" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                  <ModelConfigCard
+                    title="Strategy Model"
+                    subtitle="Analyzes results and generates optimization strategies"
+                    config={strategy}
+                    onChange={setStrategy}
                     disabled={isRunning}
-                    style={{ width: 160, accentColor: "var(--accent)" }}
+                    accentColor="#d4a574"
+                    role="strategy"
                   />
-                  <span
-                    style={{
-                      fontSize: 13,
-                      color: "var(--text-primary)",
-                      fontFamily: "var(--font-mono)",
-                      fontWeight: 600,
-                      minWidth: 20,
-                    }}
-                  >
-                    {numExperiments}
-                  </span>
+                  <ModelConfigCard
+                    title="Target Model"
+                    subtitle="The model being optimized — answers math problems"
+                    config={target}
+                    onChange={setTarget}
+                    disabled={isRunning}
+                    accentColor="#8070a8"
+                    role="target"
+                  />
                 </div>
 
-                {!isRunning ? (
-                  <button
-                    onClick={handleStart}
-                    disabled={!canStart}
-                    style={{
-                      padding: "10px 28px",
-                      borderRadius: 10,
-                      border: "none",
-                      background: canStart ? "var(--accent)" : "var(--bg-tertiary)",
-                      color: canStart ? "var(--accent-text-on)" : "var(--text-muted)",
-                      fontSize: 13,
-                      fontFamily: "var(--font-mono)",
-                      fontWeight: 600,
-                      cursor: canStart ? "pointer" : "not-allowed",
-                      letterSpacing: "0.04em",
-                      transition: "all 0.3s",
-                    }}
-                  >
-                    Start Experiment
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleCancel}
-                    style={{
-                      padding: "10px 28px",
-                      borderRadius: 10,
-                      border: "1px solid var(--error)",
-                      background: "transparent",
-                      color: "var(--error)",
-                      fontSize: 13,
-                      fontFamily: "var(--font-mono)",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      letterSpacing: "0.04em",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                )}
+                <div
+                  style={{
+                    marginTop: 24,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 24,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                      Rounds
+                    </span>
+                    <input
+                      type="range"
+                      min={1}
+                      max={30}
+                      value={numExperiments}
+                      onChange={(e) => setNumExperiments(parseInt(e.target.value))}
+                      disabled={isRunning}
+                      style={{ width: 120, accentColor: "var(--accent)" }}
+                    />
+                    <span
+                      style={{
+                        fontSize: 13,
+                        color: "var(--text-primary)",
+                        fontFamily: "var(--font-mono)",
+                        fontWeight: 600,
+                        minWidth: 20,
+                      }}
+                    >
+                      {numExperiments}
+                    </span>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                      Concurrency
+                    </span>
+                    <input
+                      type="range"
+                      min={1}
+                      max={50}
+                      value={maxConcurrency}
+                      onChange={(e) => setMaxConcurrency(parseInt(e.target.value))}
+                      disabled={isRunning}
+                      style={{ width: 120, accentColor: "var(--accent)" }}
+                    />
+                    <span
+                      style={{
+                        fontSize: 13,
+                        color: "var(--text-primary)",
+                        fontFamily: "var(--font-mono)",
+                        fontWeight: 600,
+                        minWidth: 20,
+                      }}
+                    >
+                      {maxConcurrency}
+                    </span>
+                  </div>
+
+                  {!isRunning && (
+                    <button
+                      onClick={handleStart}
+                      disabled={!canStart}
+                      style={{
+                        padding: "10px 28px",
+                        borderRadius: 10,
+                        border: "none",
+                        background: canStart ? "var(--accent)" : "var(--bg-tertiary)",
+                        color: canStart ? "var(--accent-text-on)" : "var(--text-muted)",
+                        fontSize: 13,
+                        fontFamily: "var(--font-mono)",
+                        fontWeight: 600,
+                        cursor: canStart ? "pointer" : "not-allowed",
+                        letterSpacing: "0.04em",
+                        transition: "all 0.3s",
+                      }}
+                    >
+                      Start Experiment
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
+
+        {/* Cancel bar — always visible when running */}
+        {isRunning && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "10px 18px",
+              borderRadius: 10,
+              background: "rgba(239,68,68,0.04)",
+              border: "1px solid rgba(239,68,68,0.12)",
+              marginBottom: 20,
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            <span>
+              Exp {currentExp} &middot; {phase === "starting" ? "initializing" : phase} &middot; {progress.completed}/{progress.total}
+            </span>
+            <button
+              onClick={cancelExperiment}
+              style={{
+                background: "none",
+                border: "1px solid var(--error)",
+                borderRadius: 6,
+                padding: "5px 16px",
+                color: "var(--error)",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              Cancel Experiment
+            </button>
+          </div>
+        )}
+
+        {/* Viewing history banner */}
+        {viewingHistory && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "12px 18px",
+              borderRadius: 10,
+              background: "var(--accent-bg)",
+              border: "1px solid var(--accent-border)",
+              marginBottom: 20,
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+              color: "var(--accent)",
+            }}
+          >
+            <span>
+              Viewing: {viewingHistory.strategyModel} &rarr; {viewingHistory.targetModel}
+              {" \u00B7 "}
+              {new Date(viewingHistory.timestamp).toLocaleDateString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </span>
+            <button
+              onClick={closeHistory}
+              style={{
+                background: "none",
+                border: "1px solid var(--accent-border)",
+                borderRadius: 6,
+                padding: "5px 14px",
+                color: "var(--accent)",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              Close
+            </button>
+          </div>
+        )}
 
         {/* Metrics */}
         {hasResults && (
@@ -568,7 +452,7 @@ export default function EvolveLabPage() {
                   </div>
                 )}
 
-                {phase === "done" && (
+                {phase === "done" && !viewingHistory && (
                   <div
                     style={{
                       ...cardBase,
@@ -721,17 +605,51 @@ export default function EvolveLabPage() {
           </>
         )}
 
+        {/* History list (shown when idle) */}
         {phase === "idle" && !hasResults && (
-          <div
-            style={{
-              textAlign: "center",
-              padding: "60px 0",
-              color: "var(--text-muted)",
-              fontSize: 13,
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            Configure strategy and target models above, then start the experiment.
+          <div>
+            {history.length > 0 ? (
+              <div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--text-muted)",
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    marginBottom: 14,
+                    fontWeight: 600,
+                  }}
+                >
+                  History ({history.length})
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {history.map((entry) => (
+                    <HistoryCard
+                      key={entry.id}
+                      entry={entry}
+                      onView={() => {
+                        viewHistory(entry);
+                        setActiveTab("experiments");
+                      }}
+                      onDelete={() => deleteHistory(entry.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "60px 0",
+                  color: "var(--text-muted)",
+                  fontSize: 13,
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                Configure strategy and target models above, then start the experiment.
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -971,6 +889,106 @@ function ModelConfigCard({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── HistoryCard ─────────────────────────────────────────
+
+function HistoryCard({
+  entry,
+  onView,
+  onDelete,
+}: {
+  entry: HistoryEntry;
+  onView: () => void;
+  onDelete: () => void;
+}) {
+  const kept = entry.results.filter((r) => r.status === "keep").length;
+  const date = new Date(entry.timestamp);
+  const dateStr = date.toLocaleDateString("zh-CN", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return (
+    <div
+      onClick={onView}
+      style={{
+        ...cardBase,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 16,
+        transition: "border-color 0.2s",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = "var(--accent-border)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = "var(--border-subtle)";
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 18,
+            fontWeight: 700,
+            fontFamily: "var(--font-mono)",
+            color: "var(--accent)",
+            minWidth: 52,
+          }}
+        >
+          {(entry.bestAccuracy * 100).toFixed(1)}%
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+              {entry.strategyModel} &rarr; {entry.targetModel}
+            </span>
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text-muted)",
+              fontFamily: "var(--font-sans)",
+              marginTop: 3,
+            }}
+          >
+            {entry.numRounds} rounds &middot; {Math.max(0, kept - 1)} improvements &middot; ${entry.totalCost.toFixed(4)} &middot; {dateStr}
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        style={{
+          background: "none",
+          border: "none",
+          color: "var(--text-muted)",
+          cursor: "pointer",
+          padding: "6px 8px",
+          borderRadius: 6,
+          fontSize: 14,
+          lineHeight: 1,
+          transition: "color 0.2s",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = "var(--error)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = "var(--text-muted)";
+        }}
+        title="Delete"
+      >
+        &#10005;
+      </button>
     </div>
   );
 }

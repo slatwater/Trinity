@@ -18,6 +18,7 @@ defmodule TrinityWeb.EvolveLabController do
     }
 
     num_experiments = params["numExperiments"] || 5
+    max_concurrent = params["maxConcurrent"] || 20
 
     id = Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false)
     topic = "evolvelab:#{id}"
@@ -28,7 +29,7 @@ defmodule TrinityWeb.EvolveLabController do
       DynamicSupervisor.start_child(
         Trinity.EvolveLabManager,
         {Trinity.EvolveLab,
-         %{id: id, strategy: strategy, target: target, num_experiments: num_experiments}}
+         %{id: id, strategy: strategy, target: target, num_experiments: num_experiments, max_concurrent: max_concurrent}}
       )
 
     conn

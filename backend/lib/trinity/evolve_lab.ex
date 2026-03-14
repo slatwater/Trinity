@@ -9,11 +9,10 @@ defmodule Trinity.EvolveLab do
     "format_instruction" => "Show your work, then give the final answer as: #### <number>"
   }
 
-  @max_concurrent 20
   @temperature 0
   @max_tokens 1024
 
-  defstruct [:id, :strategy, :target, :num_experiments, :problems, :task_ref]
+  defstruct [:id, :strategy, :target, :num_experiments, :max_concurrent, :problems, :task_ref]
 
   # ── Client API ─────────────────────────────────────────
 
@@ -38,6 +37,7 @@ defmodule Trinity.EvolveLab do
       strategy: args.strategy,
       target: args.target,
       num_experiments: args.num_experiments,
+      max_concurrent: args[:max_concurrent] || 20,
       problems: problems
     }
 
@@ -136,7 +136,7 @@ defmodule Trinity.EvolveLab do
 
           r
         end,
-        max_concurrency: @max_concurrent,
+        max_concurrency: state.max_concurrent,
         timeout: 60_000,
         ordered: false
       )
