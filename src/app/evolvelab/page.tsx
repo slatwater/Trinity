@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import {
   useEvolveLabStore,
   MODEL_PRESETS,
+  EVAL_TEMPLATES,
   type ModelConfig,
   type ExperimentResult,
   type PromptConfig,
@@ -20,6 +21,8 @@ export default function EvolveLabPage() {
   const [showConfig, setShowConfig] = useState(true);
   const [activeTab, setActiveTab] = useState("experiments");
   const [focusedStrategyExp, setFocusedStrategyExp] = useState<number | null>(null);
+  const [showDataset, setShowDataset] = useState(false);
+  const [datasetItems, setDatasetItems] = useState<{ question: string; answer: string }[]>([]);
 
   const goToStrategy = (exp: number) => {
     setActiveTab("strategy");
@@ -35,10 +38,19 @@ export default function EvolveLabPage() {
     strategy, target, numExperiments, maxConcurrency, phase, currentExp,
     progress, results, bestAccuracy, bestConfig, currentSuggestion,
     error, strategyDetails, errors, history, viewingHistory,
-    setStrategy, setTarget, setNumExperiments, setMaxConcurrency,
+    selectedTemplateId, setTemplate,
+    setStrategy, setTarget, setJudge, judge,
+    targetSystemPrompt, targetFormatInstruction, judgePrompt, strategyHint,
+    setTargetSystemPrompt, setTargetFormatInstruction, setJudgePrompt, setStrategyHint,
+    setNumExperiments, setMaxConcurrency,
     startExperiment, cancelExperiment,
     viewHistory, closeHistory, deleteHistory,
   } = store;
+
+  const selectedTemplate = EVAL_TEMPLATES.find(t => t.id === selectedTemplateId) || EVAL_TEMPLATES[0];
+  const showJudge = selectedTemplate.checkMode === "llm_judge";
+
+  const strategyFullPrompt = buildStrategyPrompt(selectedTemplate.checkMode, strategyHint, selectedTemplate.scoreMax);
 
   const strategyReady = strategy.provider === "sdk" || !!strategy.apiKey;
   const targetReady = !!target.apiKey;
@@ -140,6 +152,63 @@ export default function EvolveLabPage() {
           <div style={{ animation: "lineGrow 1.2s 0.3s both", height: "100%" }} />
         </div>
 
+        {/* Template Selector */}
+        {!viewingHistory && !isRunning && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12,
+            marginBottom: 20,
+          }}>
+            <select
+              value={selectedTemplateId}
+              onChange={(e) => setTemplate(e.target.value)}
+              style={{
+                ...inputBaseStyle,
+                width: "auto",
+                minWidth: 160,
+                cursor: "pointer",
+                appearance: "none",
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237a7874'/%3E%3C/svg%3E")`,
+                backgroundRepeat: "no-repeat",
+                backgroundPosition: "right 12px center",
+                paddingRight: 32,
+              }}
+            >
+              {EVAL_TEMPLATES.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                fetch(`/api/evolvelab/dataset?name=${selectedTemplate.dataset}`)
+                  .then(r => r.json())
+                  .then(data => { if (Array.isArray(data)) { setDatasetItems(data); setShowDataset(true); } })
+                  .catch(() => {});
+              }}
+              style={{
+                background: "var(--bg-secondary)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: 8,
+                padding: "8px 14px",
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                fontWeight: 600,
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              Dataset ({selectedTemplate.dataset.replace(".jsonl", "")})
+            </button>
+          </div>
+        )}
+
+        {/* Dataset Modal */}
+        {showDataset && <DatasetModal
+          name={selectedTemplate.name}
+          items={datasetItems}
+          onClose={() => setShowDataset(false)}
+        />}
+
         {/* Config Section */}
         {!viewingHistory && (
           <div style={{ marginBottom: 32 }}>
@@ -178,7 +247,7 @@ export default function EvolveLabPage() {
 
             {showConfig && (
               <div style={{ marginTop: 16, animation: "fadeUp 0.3s both" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                <div style={{ display: "grid", gridTemplateColumns: showJudge ? "1fr 1fr 1fr" : "1fr 1fr", gap: 20 }}>
                   <ModelConfigCard
                     title="Strategy Model"
                     subtitle="Analyzes results and generates optimization strategies"
@@ -187,16 +256,38 @@ export default function EvolveLabPage() {
                     disabled={isRunning}
                     accentColor="#d4a574"
                     role="strategy"
+                    prompts={[
+                      { label: "Optimization Hint", value: strategyHint, onChange: setStrategyHint },
+                      { label: "Full System Prompt", value: strategyFullPrompt, readOnly: true },
+                    ]}
                   />
                   <ModelConfigCard
                     title="Target Model"
-                    subtitle="The model being optimized — answers math problems"
+                    subtitle={showJudge ? "The model being optimized — generates responses" : "The model being optimized — answers problems"}
                     config={target}
                     onChange={setTarget}
                     disabled={isRunning}
                     accentColor="#8070a8"
                     role="target"
+                    prompts={[
+                      { label: "System Prompt", value: targetSystemPrompt, onChange: setTargetSystemPrompt },
+                      { label: "Format Instruction", value: targetFormatInstruction, onChange: setTargetFormatInstruction },
+                    ]}
                   />
+                  {showJudge && (
+                    <ModelConfigCard
+                      title="Judge Model"
+                      subtitle="Scores target responses independently (SDK Agent)"
+                      config={judge}
+                      onChange={setJudge}
+                      disabled={isRunning}
+                      accentColor="#70a880"
+                      role="judge"
+                      prompts={[
+                        { label: "Judge Prompt", value: judgePrompt, onChange: setJudgePrompt },
+                      ]}
+                    />
+                  )}
                 </div>
 
                 <div
@@ -757,6 +848,13 @@ const thStyle: React.CSSProperties = {
 
 // ── ModelConfigCard ─────────────────────────────────────
 
+interface PromptField {
+  label: string;
+  value: string;
+  onChange?: (v: string) => void;
+  readOnly?: boolean;
+}
+
 function ModelConfigCard({
   title,
   subtitle,
@@ -765,6 +863,7 @@ function ModelConfigCard({
   disabled,
   accentColor,
   role,
+  prompts,
 }: {
   title: string;
   subtitle: string;
@@ -772,11 +871,17 @@ function ModelConfigCard({
   onChange: (c: ModelConfig) => void;
   disabled: boolean;
   accentColor: string;
-  role: "strategy" | "target";
+  role: "strategy" | "target" | "judge";
+  prompts?: PromptField[];
 }) {
+  const [openPrompt, setOpenPrompt] = useState<string | null>(null);
   const isCustom = config.presetId === "custom";
   const isSdk = config.provider === "sdk";
-  const availablePresets = MODEL_PRESETS.filter((p) => role === "strategy" || !p.strategyOnly);
+  const availablePresets = MODEL_PRESETS.filter((p) => {
+    if (role === "judge") return p.strategyOnly; // SDK only
+    if (role === "strategy") return true;
+    return !p.strategyOnly;
+  });
 
   const handlePresetChange = (presetId: string) => {
     const preset = availablePresets.find((p) => p.id === presetId);
@@ -846,18 +951,26 @@ function ModelConfigCard({
             disabled={disabled}
             style={selectStyle}
           >
-            {role === "strategy" && (
-              <optgroup label="Built-in (no API key)">
-                {availablePresets.filter((p) => p.strategyOnly).map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </optgroup>
-            )}
-            <optgroup label={role === "strategy" ? "API (requires key)" : "Models"}>
-              {availablePresets.filter((p) => !p.strategyOnly).map((p) => (
+            {role === "judge" ? (
+              availablePresets.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </optgroup>
+              ))
+            ) : (
+              <>
+                {role === "strategy" && (
+                  <optgroup label="Built-in (no API key)">
+                    {availablePresets.filter((p) => p.strategyOnly).map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label={role === "strategy" ? "API (requires key)" : "Models"}>
+                  {availablePresets.filter((p) => !p.strategyOnly).map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </optgroup>
+              </>
+            )}
           </select>
         </div>
 
@@ -926,6 +1039,70 @@ function ModelConfigCard({
               />
             </div>
           </>
+        )}
+
+        {/* Prompt tags */}
+        {prompts && prompts.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-subtle)" }}>
+            {prompts.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => setOpenPrompt(openPrompt === p.label ? null : p.label)}
+                style={{
+                  background: openPrompt === p.label ? "var(--accent-bg)" : "var(--bg-tertiary)",
+                  border: `1px solid ${openPrompt === p.label ? "var(--accent-border)" : "var(--border-subtle)"}`,
+                  borderRadius: 5,
+                  padding: "3px 8px",
+                  fontSize: 9,
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: 600,
+                  color: openPrompt === p.label ? "var(--accent)" : "var(--text-muted)",
+                  cursor: "pointer",
+                  letterSpacing: "0.04em",
+                  transition: "all 0.15s",
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Prompt editor */}
+        {prompts?.map((p) =>
+          openPrompt === p.label ? (
+            <div key={p.label} style={{ marginTop: 10, animation: "fadeUp 0.2s both" }}>
+              {p.readOnly ? (
+                <pre style={{
+                  ...inputBaseStyle,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  lineHeight: 1.6,
+                  fontSize: 11,
+                  maxHeight: 260,
+                  overflow: "auto",
+                  margin: 0,
+                  color: "var(--text-secondary)",
+                }}>
+                  {p.value}
+                </pre>
+              ) : (
+                <textarea
+                  value={p.value}
+                  onChange={(e) => p.onChange?.(e.target.value)}
+                  disabled={disabled}
+                  rows={Math.min(Math.max(p.value.split("\n").length + 1, 3), 10)}
+                  style={{
+                    ...inputBaseStyle,
+                    resize: "vertical",
+                    lineHeight: 1.6,
+                    fontSize: 11,
+                    minHeight: 60,
+                  }}
+                />
+              )}
+            </div>
+          ) : null
         )}
       </div>
     </div>
@@ -1107,19 +1284,13 @@ function ConfigDiffView({ oldConfig, newConfig }: { oldConfig: PromptConfig; new
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
             {oldFs.filter(old => !newFs.some(n => JSON.stringify(n) === JSON.stringify(old))).map((ex, i) => (
-              <div key={`d${i}`} style={{ padding: "4px 8px", borderRadius: 4, background: "rgba(239,68,68,0.08)", borderLeft: "2px solid var(--error)", fontSize: 10 }}>
-                <span style={{ color: "var(--error)", textDecoration: "line-through" }}>- Q: {(ex[0] || "").slice(0, 100)}</span>
-              </div>
+              <FewShotItem key={`d${i}`} q={ex[0]} a={ex[1]} type="del" />
             ))}
             {newFs.filter(n => !oldFs.some(old => JSON.stringify(old) === JSON.stringify(n))).map((ex, i) => (
-              <div key={`a${i}`} style={{ padding: "4px 8px", borderRadius: 4, background: "rgba(34,197,94,0.08)", borderLeft: "2px solid var(--success)", fontSize: 10 }}>
-                <span style={{ color: "var(--success)" }}>+ Q: {(ex[0] || "").slice(0, 100)}</span>
-              </div>
+              <FewShotItem key={`a${i}`} q={ex[0]} a={ex[1]} type="add" />
             ))}
             {newFs.filter(n => oldFs.some(old => JSON.stringify(old) === JSON.stringify(n))).map((ex, i) => (
-              <div key={`s${i}`} style={{ fontSize: 10, color: "var(--text-muted)", padding: "2px 8px" }}>
-                Q: {(ex[0] || "").slice(0, 100)}
-              </div>
+              <FewShotItem key={`s${i}`} q={ex[0]} a={ex[1]} type="same" />
             ))}
           </div>
         )}
@@ -1134,6 +1305,37 @@ function ConfigDiffView({ oldConfig, newConfig }: { oldConfig: PromptConfig; new
           <InlineDiff oldText={oldFi} newText={newFi} />
         </div>
       </div>
+    </div>
+  );
+}
+
+function FewShotItem({ q, a, type }: { q: string; a?: string; type: "add" | "del" | "same" }) {
+  const [open, setOpen] = useState(false);
+  const colors = {
+    add: { bg: "rgba(34,197,94,0.08)", border: "var(--success)", text: "var(--success)", prefix: "+" },
+    del: { bg: "rgba(239,68,68,0.08)", border: "var(--error)", text: "var(--error)", prefix: "-" },
+    same: { bg: "transparent", border: "var(--border-subtle)", text: "var(--text-muted)", prefix: "" },
+  }[type];
+
+  return (
+    <div
+      style={{
+        padding: "6px 10px", borderRadius: 4, fontSize: 10, cursor: a ? "pointer" : "default",
+        background: colors.bg, borderLeft: `2px solid ${colors.border}`,
+        textDecoration: type === "del" ? "line-through" : "none",
+      }}
+      onClick={() => a && setOpen(!open)}
+    >
+      <div style={{ color: colors.text, display: "flex", alignItems: "baseline", gap: 4 }}>
+        {colors.prefix && <span>{colors.prefix}</span>}
+        <span>Q: {q || ""}</span>
+        {a && <span style={{ fontSize: 8, opacity: 0.6, marginLeft: 4 }}>{open ? "▾" : "▸"}</span>}
+      </div>
+      {open && a && (
+        <div style={{ color: colors.text, opacity: 0.75, marginTop: 6, paddingLeft: 12, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
+          A: {a}
+        </div>
+      )}
     </div>
   );
 }
@@ -1512,7 +1714,7 @@ function LiveExperimentCard({
 }: {
   phase: Phase;
   currentExp: number;
-  progress: { completed: number; total: number; correct: number };
+  progress: { completed: number; total: number; correct: number | string };
   suggestion: string | null;
   isBaseline: boolean;
 }) {
@@ -1575,7 +1777,7 @@ function LiveExperimentCard({
             }}
           >
             <span>
-              {progress.completed}/{progress.total} — correct {progress.correct}
+              {progress.completed}/{progress.total} — {typeof progress.correct === "string" ? progress.correct : `correct ${progress.correct}`}
             </span>
             <span>{pct.toFixed(0)}%</span>
           </div>
@@ -1672,6 +1874,163 @@ function AccuracyChart({ results, onNodeClick }: { results: ExperimentResult[]; 
 }
 
 // ── Helpers ─────────────────────────────────────────────
+
+// ── DatasetModal ───────────────────────────────────────
+
+function DatasetModal({ name, items, onClose }: { name: string; items: { question: string; answer: string }[]; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      onMouseDown={onClose}
+      style={{
+        position: "fixed",
+        top: 0, left: 0, right: 0, bottom: 0,
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        paddingTop: 80,
+        paddingBottom: 40,
+        background: "rgba(0,0,0,0.5)",
+        backdropFilter: "blur(4px)",
+      }}
+    >
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          width: "90%",
+          maxWidth: 800,
+          maxHeight: "calc(100vh - 120px)",
+          borderRadius: 16,
+          background: "var(--bg-primary)",
+          border: "1px solid var(--border-subtle)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "16px 22px",
+          borderBottom: "1px solid var(--border-subtle)",
+          flexShrink: 0,
+        }}>
+          <div>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
+              {name}
+            </span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: 10, fontFamily: "var(--font-mono)" }}>
+              {items.length} questions
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: "none", border: "none", color: "var(--text-muted)",
+              fontSize: 18, cursor: "pointer", padding: "4px 8px", lineHeight: 1,
+            }}
+          >
+            &#10005;
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ overflow: "auto", padding: "16px 22px", flex: 1 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {items.map((item, i) => (
+              <div key={i} style={{
+                padding: "14px 16px",
+                borderRadius: 10,
+                background: "var(--bg-secondary)",
+                border: "1px solid var(--border-subtle)",
+                fontSize: 12,
+                fontFamily: "var(--font-mono)",
+                lineHeight: 1.6,
+              }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, color: "var(--accent)",
+                    background: "var(--accent-bg)", padding: "2px 6px", borderRadius: 4,
+                    letterSpacing: "0.04em", flexShrink: 0,
+                  }}>
+                    Q{i + 1}
+                  </span>
+                  <span style={{ color: "var(--text-primary)" }}>{item.question}</span>
+                </div>
+                <div style={{ color: "var(--text-muted)", fontSize: 11, paddingLeft: 2 }}>
+                  {item.answer}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildStrategyPrompt(checkMode: string, hint: string, scoreMax: number): string {
+  if (checkMode === "llm_judge") {
+    return `你是一位提示词工程专家，正在优化${hint}。
+
+被测模型的回复将由裁判模型从四个维度综合打 1-${scoreMax} 分：
+1. 同理心（25%）：是否理解客户情绪、表达关怀
+2. 方案质量（25%）：方案是否具体、可行、步骤清晰
+3. 要点覆盖（25%）：是否覆盖评判要点中的关键内容
+4. 专业度（25%）：流程是否准确、用语是否规范
+
+你的目标是提高平均得分。请根据实验历史中的得分变化，判断哪个维度最薄弱，针对性优化。
+
+请返回一个 JSON 对象（不要 markdown，不要代码块，只要纯 JSON）：
+{
+  "system_prompt": "...",
+  "few_shot_examples": [["用户问题", "理想回复"], ...],
+  "format_instruction": "...",
+  "description": "一句话总结本次修改"
+}
+
+规则：
+- few_shot_examples：0-5 条，每条是 [问题, 理想回复]。
+- 示例回复应展示理想的回复风格和要点覆盖。
+- 每次实验只做一个有意义的修改，便于隔离效果。
+- 尝试不同风格：语气变化、结构调整、增加共情表达、添加后续跟进等。
+- 如果连续几次尝试都没有提升，请尝试完全不同的方向。`;
+  }
+
+  const scoreNote = "Responses are checked for exact correctness. Optimize for higher accuracy.";
+
+  const domainRules = checkMode === "numeric"
+    ? "- The response in few-shot should demonstrate clear step-by-step reasoning ending with #### <number>."
+    : "- The response in few-shot should demonstrate the expected answer format.";
+
+  return `You are a prompt engineering expert optimizing ${hint}.
+
+${scoreNote}
+
+Respond with a JSON object (no markdown, no code fences, pure JSON only):
+{
+  "system_prompt": "...",
+  "few_shot_examples": [["question", "ideal_response"], ...],
+  "format_instruction": "...",
+  "description": "one-line summary of the change"
+}
+
+Rules:
+- few_shot_examples: 0-5 items, each is [question_string, response_string].
+${domainRules}
+- Try ONE meaningful change per experiment to isolate what helps.
+- Be creative: different styles, roles, verification steps, output formats.
+- If several attempts failed, try something radically different.`;
+}
 
 function configToCode(config: PromptConfig): string {
   const lines: string[] = [];

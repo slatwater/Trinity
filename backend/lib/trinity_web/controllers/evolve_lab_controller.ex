@@ -17,19 +17,53 @@ defmodule TrinityWeb.EvolveLabController do
       model: get_in(params, ["target", "model"])
     }
 
+    judge = case params["judge"] do
+      nil -> nil
+      j -> %{
+        provider: j["provider"] || "sdk",
+        sdk_model: j["sdkModel"] || "sonnet",
+        api_key: j["apiKey"] || "",
+        base_url: j["baseUrl"] || "",
+        model: j["model"] || ""
+      }
+    end
+
     num_experiments = params["numExperiments"] || 5
-    max_concurrent = params["maxConcurrent"] || 20
+    max_concurrent = params["maxConcurrent"] || 5
+    template = params["template"] || %{}
 
     id = Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false)
     topic = "evolvelab:#{id}"
 
     Phoenix.PubSub.subscribe(Trinity.PubSub, topic)
 
+    # Parse default_config from template (keys come as camelCase from frontend)
+    default_config =
+      case template["defaultConfig"] do
+        %{"system_prompt" => _} = cfg -> cfg
+        %{"systemPrompt" => sp} = cfg ->
+          %{
+            "system_prompt" => sp,
+            "few_shot_examples" => cfg["fewShotExamples"] || cfg["few_shot_examples"] || [],
+            "format_instruction" => cfg["formatInstruction"] || cfg["format_instruction"] || ""
+          }
+        _ -> nil
+      end
+
     {:ok, _pid} =
       DynamicSupervisor.start_child(
         Trinity.EvolveLabManager,
         {Trinity.EvolveLab,
-         %{id: id, strategy: strategy, target: target, num_experiments: num_experiments, max_concurrent: max_concurrent}}
+         %{
+           id: id, strategy: strategy, target: target,
+           num_experiments: num_experiments, max_concurrent: max_concurrent, judge: judge,
+           dataset: template["dataset"],
+           check_mode: template["checkMode"],
+           judge_prompt: template["judgePrompt"],
+           strategy_hint: template["strategyHint"],
+           default_config: default_config,
+           score_max: template["scoreMax"]
+         }}
       )
 
     conn
@@ -46,6 +80,25 @@ defmodule TrinityWeb.EvolveLabController do
   def delete(conn, %{"id" => id}) do
     Trinity.EvolveLab.cancel(id)
     json(conn, %{ok: true})
+  end
+
+  def dataset(conn, %{"name" => name}) do
+    if String.contains?(name, "..") or String.contains?(name, "/") do
+      conn |> put_status(400) |> json(%{error: "invalid"})
+    else
+      path = :code.priv_dir(:trinity) |> to_string() |> Path.join("evolvelab/#{name}")
+      case File.read(path) do
+        {:ok, content} ->
+          problems = content |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+          json(conn, problems)
+        {:error, _} ->
+          conn |> put_status(404) |> json(%{error: "not found"})
+      end
+    end
+  end
+
+  def dataset(conn, _params) do
+    conn |> put_status(400) |> json(%{error: "name required"})
   end
 
   defp stream_loop(conn, topic) do

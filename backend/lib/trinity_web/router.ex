@@ -21,6 +21,7 @@ defmodule TrinityWeb.Router do
     delete "/autopilot/:id", AutoPilotController, :delete
 
     post "/evolvelab", EvolveLabController, :create
+    get "/evolvelab/dataset", EvolveLabController, :dataset
     delete "/evolvelab/:id", EvolveLabController, :delete
 
     get "/news", NewsController, :index

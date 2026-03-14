@@ -55,7 +55,7 @@ backend/
 │   ├── application.ex            # 监督树
 │   ├── claude_session.ex         # GenServer：Claude 进程 + 工作流追踪
 │   ├── auto_pilot.ex             # GenServer：双 Agent 编排器（状态机）
-│   ├── evolve_lab.ex             # GenServer：prompt 进化引擎（策略详情 + 错误收集）
+│   ├── evolve_lab.ex             # GenServer：多模板 prompt 进化（numeric/llm_judge + 三模型）
 │   ├── news_fetcher.ex           # GenServer：定时推特抓取 + Sonnet 4.6 总结
 │   ├── stage_mapper.ex           # 工具名 → 阶段标签
 │   └── stream_event_parser.ex    # SDK 事件 → SSE JSON
@@ -69,7 +69,8 @@ electron/main.ts + preload.ts     # Electron 主进程 + 预加载
 | 路由 | 作用 |
 |------|------|
 | `POST/GET/DELETE /api/autopilot[/:id][/message\|confirm]` | Auto Pilot 全流程 |
-| `POST /api/evolvelab` | 启动 prompt 进化实验（SSE 流式，支持 maxConcurrent 参数） |
+| `POST /api/evolvelab` | 启动实验（SSE 流式，支持模板/裁判/并发参数） |
+| `GET /api/evolvelab/dataset?name=` | 获取评测题库数据 |
 | `DELETE /api/evolvelab/:id` | 取消实验 |
 | `GET/POST/DELETE /api/evolvelab/history` | 实验历史记录（存储 `~/.trinity/evolvelab/`） |
 | `GET/POST/PUT /api/news[/*]` | 新闻数据 / 刷新 / 推特账号配置 |
@@ -79,5 +80,5 @@ electron/main.ts + preload.ts     # Electron 主进程 + 预加载
 - CSS 变量主题化 `[data-theme="light"]` + localStorage；Sidebar 68px 上下分区布局
 - ClaudeAgentSDK：`model: "opus"` + `effort: :high` + `preset: :claude_code` + `bypassPermissions`
 - Electron：hiddenInset 标题栏，内嵌 Elixir release + Next.js standalone
-- EvolveLab：策略模型(SDK) 建议 prompt → 被测模型(API) 并发评测 200 题（可调 1-50）→ 比较保留最优
+- EvolveLab：多模板评测（GSM8K/客服），三模型架构（策略+被测+裁判），子维度评分，可调并发/提示词
 - News：Cookie 认证抓推特 → Google 翻译 → Sonnet 4.6 总结，数据存 `~/.trinity/news/`
