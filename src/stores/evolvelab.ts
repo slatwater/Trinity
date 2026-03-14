@@ -28,6 +28,23 @@ export interface HistoryEntry {
   totalCost: number;
   results: ExperimentResult[];
   bestConfig: PromptConfig | null;
+  strategyDetails: StrategyDetail[];
+  errors: ErrorEntry[];
+}
+
+export interface StrategyDetail {
+  exp: number;
+  inputConfig: PromptConfig;
+  inputHistory: string;
+  rawOutput: string;
+  description: string;
+  outputConfig: PromptConfig | null;
+}
+
+export interface ErrorEntry {
+  exp: number;
+  question: string;
+  error: string;
 }
 
 export type Phase = "idle" | "starting" | "baseline" | "suggesting" | "evaluating" | "done" | "error";
@@ -81,6 +98,8 @@ interface EvolveLabState {
   bestConfig: PromptConfig | null;
   currentSuggestion: string | null;
   error: string | null;
+  strategyDetails: StrategyDetail[];
+  errors: ErrorEntry[];
 
   // History
   history: HistoryEntry[];
@@ -137,6 +156,27 @@ function handleEvent(event: Record<string, unknown>) {
       });
       break;
     }
+    case "strategy_detail": {
+      const detail: StrategyDetail = {
+        exp: event.exp as number,
+        inputConfig: event.input_config as PromptConfig,
+        inputHistory: event.input_history as string,
+        rawOutput: event.raw_output as string,
+        description: event.description as string,
+        outputConfig: event.output_config as PromptConfig | null,
+      };
+      setState({ strategyDetails: [...getState().strategyDetails, detail] });
+      break;
+    }
+    case "eval_error": {
+      const err: ErrorEntry = {
+        exp: event.exp as number,
+        question: event.question as string,
+        error: event.error as string,
+      };
+      setState({ errors: [...getState().errors, err] });
+      break;
+    }
     case "done": {
       const ba = event.best_accuracy as number;
       const bc = event.best_config as PromptConfig;
@@ -157,6 +197,8 @@ function handleEvent(event: Record<string, unknown>) {
           totalCost: allResults.reduce((s, r) => s + r.cost, 0),
           results: allResults,
           bestConfig: bc,
+          strategyDetails: getState().strategyDetails,
+          errors: getState().errors,
         };
         setState({ history: [entry, ...getState().history] });
         fetch("/api/evolvelab/history", {
@@ -284,6 +326,8 @@ export const useEvolveLabStore = create<EvolveLabState>((set, get) => {
     bestConfig: null,
     currentSuggestion: null,
     error: null,
+    strategyDetails: [],
+    errors: [],
 
     history: [],
     viewingHistory: null,
@@ -307,6 +351,8 @@ export const useEvolveLabStore = create<EvolveLabState>((set, get) => {
         bestConfig: null,
         error: null,
         currentSuggestion: null,
+        strategyDetails: [],
+        errors: [],
         viewingHistory: null,
       });
 
@@ -338,6 +384,8 @@ export const useEvolveLabStore = create<EvolveLabState>((set, get) => {
         results: entry.results,
         bestAccuracy: entry.bestAccuracy,
         bestConfig: entry.bestConfig,
+        strategyDetails: entry.strategyDetails || [],
+        errors: entry.errors || [],
         phase: "done",
       });
     },
@@ -348,6 +396,8 @@ export const useEvolveLabStore = create<EvolveLabState>((set, get) => {
         results: [],
         bestAccuracy: 0,
         bestConfig: null,
+        strategyDetails: [],
+        errors: [],
         phase: "idle",
       });
     },

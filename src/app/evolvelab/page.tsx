@@ -7,6 +7,8 @@ import {
   type ModelConfig,
   type ExperimentResult,
   type PromptConfig,
+  type StrategyDetail,
+  type ErrorEntry,
   type HistoryEntry,
   type Phase,
 } from "@/stores/evolvelab";
@@ -17,6 +19,12 @@ export default function EvolveLabPage() {
   const store = useEvolveLabStore();
   const [showConfig, setShowConfig] = useState(true);
   const [activeTab, setActiveTab] = useState("experiments");
+  const [focusedStrategyExp, setFocusedStrategyExp] = useState<number | null>(null);
+
+  const goToStrategy = (exp: number) => {
+    setActiveTab("strategy");
+    setFocusedStrategyExp(exp);
+  };
 
   useEffect(() => {
     store.loadHistory();
@@ -26,7 +34,7 @@ export default function EvolveLabPage() {
   const {
     strategy, target, numExperiments, maxConcurrency, phase, currentExp,
     progress, results, bestAccuracy, bestConfig, currentSuggestion,
-    error, history, viewingHistory,
+    error, strategyDetails, errors, history, viewingHistory,
     setStrategy, setTarget, setNumExperiments, setMaxConcurrency,
     startExperiment, cancelExperiment,
     viewHistory, closeHistory, deleteHistory,
@@ -405,29 +413,42 @@ export default function EvolveLabPage() {
                 borderBottom: "1px solid var(--border-subtle)",
               }}
             >
-              {["experiments", "prompt", "data"].map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    borderBottom:
-                      activeTab === tab ? "2px solid var(--accent)" : "2px solid transparent",
-                    color: activeTab === tab ? "var(--accent)" : "var(--text-muted)",
-                    fontSize: 12,
-                    fontFamily: "var(--font-mono)",
-                    padding: "10px 16px",
-                    cursor: "pointer",
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    fontWeight: 600,
-                    transition: "all 0.2s",
-                  }}
-                >
-                  {tab === "experiments" ? "Experiments" : tab === "prompt" ? "Best Prompt" : "Data"}
-                </button>
-              ))}
+              {["experiments", "prompt", "data", "strategy", "errors"].map((tab) => {
+                const label = {
+                  experiments: "Experiments",
+                  prompt: "Best Prompt",
+                  data: "Data",
+                  strategy: "Strategy",
+                  errors: `Errors${errors.length > 0 ? ` (${errors.length})` : ""}`,
+                }[tab]!;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      borderBottom:
+                        activeTab === tab ? "2px solid var(--accent)" : "2px solid transparent",
+                      color: activeTab === tab
+                        ? "var(--accent)"
+                        : tab === "errors" && errors.length > 0
+                          ? "var(--error)"
+                          : "var(--text-muted)",
+                      fontSize: 12,
+                      fontFamily: "var(--font-mono)",
+                      padding: "10px 16px",
+                      cursor: "pointer",
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      fontWeight: 600,
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
 
             {activeTab === "experiments" && (
@@ -521,7 +542,7 @@ export default function EvolveLabPage() {
                       border: "1px solid var(--border-subtle)",
                     }}
                   >
-                    <AccuracyChart results={results} />
+                    <AccuracyChart results={results} onNodeClick={goToStrategy} />
                   </div>
                 )}
 
@@ -554,7 +575,17 @@ export default function EvolveLabPage() {
                     </thead>
                     <tbody>
                       {results.map((r) => (
-                        <tr key={r.exp} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                        <tr
+                          key={r.exp}
+                          onClick={() => r.exp > 0 && goToStrategy(r.exp)}
+                          style={{
+                            borderBottom: "1px solid var(--border-subtle)",
+                            cursor: r.exp > 0 ? "pointer" : "default",
+                            transition: "background 0.15s",
+                          }}
+                          onMouseEnter={(e) => { if (r.exp > 0) e.currentTarget.style.background = "var(--bg-tertiary)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = ""; }}
+                        >
                           <td style={tdStyle}>{r.exp}</td>
                           <td style={tdStyle}>{(r.accuracy * 100).toFixed(1)}%</td>
                           <td style={tdStyle}>{r.correct}</td>
@@ -601,6 +632,14 @@ export default function EvolveLabPage() {
                   </table>
                 </div>
               </div>
+            )}
+
+            {activeTab === "strategy" && (
+              <StrategyPanel details={strategyDetails} results={results} focusedExp={focusedStrategyExp} onFocusClear={() => setFocusedStrategyExp(null)} />
+            )}
+
+            {activeTab === "errors" && (
+              <ErrorsPanel errors={errors} />
             )}
           </>
         )}
@@ -993,6 +1032,370 @@ function HistoryCard({
   );
 }
 
+// ── Diff Utilities ─────────────────────────────────────
+
+function computeWordDiff(oldText: string, newText: string): { type: "same" | "add" | "del"; text: string }[] {
+  if (oldText === newText) return [{ type: "same", text: newText }];
+  const oldW = oldText.split(/(\s+)/);
+  const newW = newText.split(/(\s+)/);
+  const m = oldW.length, n = newW.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = oldW[i - 1] === newW[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+  const raw: { type: "same" | "add" | "del"; text: string }[] = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldW[i - 1] === newW[j - 1]) { raw.unshift({ type: "same", text: oldW[i - 1] }); i--; j--; }
+    else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) { raw.unshift({ type: "add", text: newW[j - 1] }); j--; }
+    else { raw.unshift({ type: "del", text: oldW[i - 1] }); i--; }
+  }
+  const merged: typeof raw = [];
+  for (const p of raw) {
+    if (merged.length && merged[merged.length - 1].type === p.type) merged[merged.length - 1].text += p.text;
+    else merged.push({ ...p });
+  }
+  return merged;
+}
+
+function InlineDiff({ oldText, newText }: { oldText: string; newText: string }) {
+  if (oldText === newText) return <span style={{ color: "var(--text-secondary)" }}>{newText}</span>;
+  const parts = computeWordDiff(oldText, newText);
+  return (
+    <span>
+      {parts.map((p, i) => (
+        <span key={i} style={
+          p.type === "del" ? { background: "rgba(239,68,68,0.15)", color: "var(--error)", textDecoration: "line-through" }
+            : p.type === "add" ? { background: "rgba(34,197,94,0.15)", color: "var(--success)" }
+              : undefined
+        }>{p.text}</span>
+      ))}
+    </span>
+  );
+}
+
+function ConfigDiffView({ oldConfig, newConfig }: { oldConfig: PromptConfig; newConfig: PromptConfig }) {
+  const oldSp = oldConfig?.system_prompt || "";
+  const newSp = newConfig?.system_prompt || "";
+  const oldFi = oldConfig?.format_instruction || "";
+  const newFi = newConfig?.format_instruction || "";
+  const oldFs = oldConfig?.few_shot_examples || [];
+  const newFs = newConfig?.few_shot_examples || [];
+  const fsChanged = JSON.stringify(oldFs) !== JSON.stringify(newFs);
+
+  return (
+    <div style={{ ...preStyle, display: "flex", flexDirection: "column", gap: 16 }}>
+      <div>
+        <div style={diffFieldLabel}>
+          system_prompt
+          {oldSp !== newSp && <span style={{ color: "var(--warning)", marginLeft: 6, fontSize: 8 }}>CHANGED</span>}
+        </div>
+        <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.8 }}>
+          <InlineDiff oldText={oldSp} newText={newSp} />
+        </div>
+      </div>
+
+      <div>
+        <div style={diffFieldLabel}>
+          few_shot_examples
+          {fsChanged && <span style={{ color: "var(--warning)", marginLeft: 6, fontSize: 8 }}>CHANGED</span>}
+        </div>
+        {!fsChanged ? (
+          <div style={{ color: "var(--text-secondary)" }}>
+            {newFs.length === 0 ? "[] (none)" : `${newFs.length} example(s), unchanged`}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+            {oldFs.filter(old => !newFs.some(n => JSON.stringify(n) === JSON.stringify(old))).map((ex, i) => (
+              <div key={`d${i}`} style={{ padding: "4px 8px", borderRadius: 4, background: "rgba(239,68,68,0.08)", borderLeft: "2px solid var(--error)", fontSize: 10 }}>
+                <span style={{ color: "var(--error)", textDecoration: "line-through" }}>- Q: {(ex[0] || "").slice(0, 100)}</span>
+              </div>
+            ))}
+            {newFs.filter(n => !oldFs.some(old => JSON.stringify(old) === JSON.stringify(n))).map((ex, i) => (
+              <div key={`a${i}`} style={{ padding: "4px 8px", borderRadius: 4, background: "rgba(34,197,94,0.08)", borderLeft: "2px solid var(--success)", fontSize: 10 }}>
+                <span style={{ color: "var(--success)" }}>+ Q: {(ex[0] || "").slice(0, 100)}</span>
+              </div>
+            ))}
+            {newFs.filter(n => oldFs.some(old => JSON.stringify(old) === JSON.stringify(n))).map((ex, i) => (
+              <div key={`s${i}`} style={{ fontSize: 10, color: "var(--text-muted)", padding: "2px 8px" }}>
+                Q: {(ex[0] || "").slice(0, 100)}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div style={diffFieldLabel}>
+          format_instruction
+          {oldFi !== newFi && <span style={{ color: "var(--warning)", marginLeft: 6, fontSize: 8 }}>CHANGED</span>}
+        </div>
+        <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.8 }}>
+          <InlineDiff oldText={oldFi} newText={newFi} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const diffFieldLabel: React.CSSProperties = {
+  fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--text-muted)",
+  letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6, fontWeight: 600,
+};
+
+function AccuracyChangeView({ exp, results }: { exp: number; results: ExperimentResult[] }) {
+  const result = results.find(r => r.exp === exp);
+  const prevKeeps = results.filter(r => r.exp < exp && r.status === "keep");
+  const prevBest = prevKeeps.length > 0 ? Math.max(...prevKeeps.map(r => r.accuracy)) : 0;
+
+  if (!result) return <div style={{ color: "var(--text-muted)", fontSize: 11 }}>—</div>;
+
+  const change = result.accuracy - prevBest;
+
+  return (
+    <div style={{ ...preStyle, display: "flex", alignItems: "center", gap: 12 }}>
+      <span style={{ fontSize: 13, color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>
+        {(prevBest * 100).toFixed(1)}%
+      </span>
+      <span style={{ color: "var(--text-muted)" }}>&rarr;</span>
+      <span style={{
+        fontSize: 13, fontWeight: 600, fontFamily: "var(--font-mono)",
+        color: result.status === "keep" ? "var(--success)" : "var(--text-secondary)",
+      }}>
+        {(result.accuracy * 100).toFixed(1)}%
+      </span>
+      <span style={{
+        fontSize: 11, fontWeight: 600,
+        color: change > 0 ? "var(--success)" : change < 0 ? "var(--error)" : "var(--text-muted)",
+      }}>
+        ({change > 0 ? "+" : ""}{(change * 100).toFixed(1)}%)
+      </span>
+      <span style={{
+        padding: "2px 7px", borderRadius: 4, fontSize: 9, fontWeight: 600,
+        background: result.status === "keep" ? "rgba(34,197,94,0.1)" : result.status === "crash" ? "rgba(234,179,8,0.1)" : "rgba(239,68,68,0.08)",
+        color: result.status === "keep" ? "var(--success)" : result.status === "crash" ? "var(--warning)" : "var(--error)",
+      }}>
+        {result.status}
+      </span>
+    </div>
+  );
+}
+
+// ── StrategyPanel ──────────────────────────────────────
+
+function StrategyPanel({ details, results, focusedExp, onFocusClear }: { details: StrategyDetail[]; results: ExperimentResult[]; focusedExp?: number | null; onFocusClear?: () => void }) {
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (focusedExp != null && details.some(d => d.exp === focusedExp)) {
+      setExpanded(focusedExp);
+      onFocusClear?.();
+      setTimeout(() => {
+        document.getElementById(`strategy-exp-${focusedExp}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 50);
+    }
+  }, [focusedExp, details, onFocusClear]);
+
+  if (details.length === 0) {
+    return (
+      <div style={{ ...cardBase, color: "var(--text-muted)", textAlign: "center" }}>
+        {results.length > 0 ? "No strategy data (baseline only)." : "No data yet."}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {details.map((d) => {
+        const result = results.find((r) => r.exp === d.exp);
+        const isOpen = expanded === d.exp;
+        const isKeep = result?.status === "keep";
+
+        return (
+          <div
+            key={d.exp}
+            id={`strategy-exp-${d.exp}`}
+            style={{
+              ...cardBase,
+              border: `1px solid ${isKeep ? "rgba(34,197,94,0.15)" : "var(--border-subtle)"}`,
+              cursor: "pointer",
+            }}
+            onClick={() => setExpanded(isOpen ? null : d.exp)}
+          >
+            {/* Summary row */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+                <span style={{
+                  fontSize: 10, display: "inline-block",
+                  transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+                  transition: "transform 0.2s", color: "var(--text-muted)",
+                }}>&#9654;</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
+                  Exp {d.exp}
+                </span>
+                <span style={{
+                  fontSize: 11, color: "var(--text-secondary)",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1,
+                }}>
+                  {d.description}
+                </span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                {result && (
+                  <span style={{
+                    fontSize: 12, fontWeight: 600,
+                    color: isKeep ? "var(--success)" : "var(--text-muted)",
+                  }}>
+                    {(result.accuracy * 100).toFixed(1)}%
+                  </span>
+                )}
+                <span style={{
+                  padding: "2px 7px", borderRadius: 4, fontSize: 9, fontWeight: 600,
+                  background: isKeep ? "rgba(34,197,94,0.1)" : result?.status === "crash" ? "rgba(234,179,8,0.1)" : "rgba(239,68,68,0.08)",
+                  color: isKeep ? "var(--success)" : result?.status === "crash" ? "var(--warning)" : "var(--error)",
+                }}>
+                  {result?.status || "—"}
+                </span>
+              </div>
+            </div>
+
+            {/* Expanded detail */}
+            {isOpen && (
+              <div style={{ marginTop: 16, animation: "fadeUp 0.2s both" }}>
+                {/* Config diff */}
+                {d.outputConfig && d.inputConfig && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ ...sectionLabel }}>New Config</div>
+                    <ConfigDiffView oldConfig={d.inputConfig} newConfig={d.outputConfig} />
+                  </div>
+                )}
+
+                {/* Input: current best config */}
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ ...sectionLabel }}>Input Config (current best)</div>
+                  <pre style={preStyle}>
+                    {JSON.stringify(d.inputConfig, null, 2)}
+                  </pre>
+                </div>
+
+                {/* Accuracy change */}
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ ...sectionLabel }}>Accuracy</div>
+                  <AccuracyChangeView exp={d.exp} results={results} />
+                </div>
+
+                {/* Raw output */}
+                {d.rawOutput && (
+                  <div>
+                    <div style={{ ...sectionLabel }}>Raw Model Output</div>
+                    <pre style={preStyle}>{d.rawOutput}</pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+const sectionLabel: React.CSSProperties = {
+  fontSize: 9,
+  fontFamily: "var(--font-mono)",
+  color: "var(--text-muted)",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  marginBottom: 6,
+  fontWeight: 600,
+};
+
+const preStyle: React.CSSProperties = {
+  margin: 0,
+  padding: "12px 14px",
+  borderRadius: 8,
+  background: "var(--bg-tertiary)",
+  border: "1px solid var(--border-subtle)",
+  fontSize: 11,
+  fontFamily: "var(--font-mono)",
+  color: "var(--text-secondary)",
+  lineHeight: 1.6,
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+  maxHeight: 300,
+  overflow: "auto",
+};
+
+// ── ErrorsPanel ───────────────────────────────────────
+
+function ErrorsPanel({ errors }: { errors: ErrorEntry[] }) {
+  if (errors.length === 0) {
+    return (
+      <div style={{ ...cardBase, color: "var(--text-muted)", textAlign: "center" }}>
+        No errors recorded.
+      </div>
+    );
+  }
+
+  // Group by exp
+  const grouped = new Map<number, ErrorEntry[]>();
+  for (const e of errors) {
+    const list = grouped.get(e.exp) || [];
+    list.push(e);
+    grouped.set(e.exp, list);
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{
+        padding: "10px 16px", borderRadius: 10,
+        background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.12)",
+        fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--error)",
+      }}>
+        {errors.length} error{errors.length > 1 ? "s" : ""} across {grouped.size} round{grouped.size > 1 ? "s" : ""}
+      </div>
+
+      {Array.from(grouped.entries()).map(([exp, errs]) => (
+        <div key={exp} style={{ ...cardBase }}>
+          <div style={{
+            fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginBottom: 10,
+            display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <span>Exp {exp}</span>
+            <span style={{
+              fontSize: 10, padding: "2px 7px", borderRadius: 4,
+              background: "rgba(239,68,68,0.08)", color: "var(--error)", fontWeight: 600,
+            }}>
+              {errs.length}
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {errs.map((e, i) => (
+              <div key={i} style={{
+                padding: "8px 12px", borderRadius: 8,
+                background: "var(--bg-tertiary)", border: "1px solid var(--border-subtle)",
+                fontSize: 11, fontFamily: "var(--font-mono)", lineHeight: 1.5,
+              }}>
+                <div style={{ color: "var(--error)", marginBottom: 4, wordBreak: "break-word" }}>
+                  {e.error}
+                </div>
+                {e.question && e.question !== "(task exited)" && (
+                  <div style={{
+                    color: "var(--text-muted)", fontSize: 10,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    Q: {e.question}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── MetricCard ──────────────────────────────────────────
 
 function MetricCard({ label, value }: { label: string; value: string }) {
@@ -1184,7 +1587,7 @@ function LiveExperimentCard({
 
 // ── AccuracyChart ───────────────────────────────────────
 
-function AccuracyChart({ results }: { results: ExperimentResult[] }) {
+function AccuracyChart({ results, onNodeClick }: { results: ExperimentResult[]; onNodeClick?: (exp: number) => void }) {
   const w = 1000;
   const h = 160;
   const pad = { top: 16, right: 24, bottom: 28, left: 50 };
@@ -1260,6 +1663,8 @@ function AccuracyChart({ results }: { results: ExperimentResult[] }) {
           }
           stroke="var(--bg-secondary)"
           strokeWidth="2"
+          style={{ cursor: p.r.exp > 0 ? "pointer" : "default" }}
+          onClick={() => p.r.exp > 0 && onNodeClick?.(p.r.exp)}
         />
       ))}
     </svg>

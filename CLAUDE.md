@@ -25,7 +25,7 @@ src/
 ├── app/
 │   ├── page.tsx                  # Code 首页（项目仪表盘 + Auto Pilot 入口）
 │   ├── config/page.tsx           # Config 页（全局+项目配置树 + 编辑器）
-│   ├── evolvelab/page.tsx         # EvolveLab 页（自主 prompt 进化实验）
+│   ├── evolvelab/page.tsx         # EvolveLab 页（实验/策略详情/错误/数据 多标签）
 │   ├── news/page.tsx             # News 页（推特新闻摘要 × 3 分类）
 │   ├── project/[id]/page.tsx     # 项目聊天页
 │   ├── api/evolvelab/route.ts    # EvolveLab SSE 流式代理
@@ -48,14 +48,14 @@ src/
 │   └── types.ts                  # 类型定义
 └── stores/
     ├── chat.ts                   # 聊天状态管理
-    └── evolvelab.ts              # EvolveLab 状态管理（类型 + SSE + 历史）
+    └── evolvelab.ts              # EvolveLab 状态管理（SSE + 历史 + 策略详情 + 错误）
 
 backend/
 ├── lib/trinity/
 │   ├── application.ex            # 监督树
 │   ├── claude_session.ex         # GenServer：Claude 进程 + 工作流追踪
 │   ├── auto_pilot.ex             # GenServer：双 Agent 编排器（状态机）
-│   ├── evolve_lab.ex             # GenServer：自主 prompt 进化引擎（GSM8K 评测）
+│   ├── evolve_lab.ex             # GenServer：prompt 进化引擎（策略详情 + 错误收集）
 │   ├── news_fetcher.ex           # GenServer：定时推特抓取 + Sonnet 4.6 总结
 │   ├── stage_mapper.ex           # 工具名 → 阶段标签
 │   └── stream_event_parser.ex    # SDK 事件 → SSE JSON

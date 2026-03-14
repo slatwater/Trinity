@@ -84,9 +84,14 @@ defmodule Trinity.EvolveLab do
     broadcast(state.id, %{type: "phase", phase: "suggesting", exp: i})
 
     case suggest(state.strategy, best_cfg, rows) do
-      {:ok, suggestion} ->
+      {:ok, suggestion, detail} ->
         desc = suggestion["description"] || "unknown"
         new_cfg = extract_config(suggestion)
+        broadcast(state.id, %{
+          type: "strategy_detail", exp: i,
+          input_config: best_cfg, input_history: detail.history,
+          raw_output: detail.raw_output, description: desc, output_config: new_cfg
+        })
         broadcast(state.id, %{type: "suggestion", exp: i, description: desc, config: new_cfg})
 
         broadcast(state.id, %{type: "phase", phase: "evaluating", exp: i})
@@ -102,6 +107,11 @@ defmodule Trinity.EvolveLab do
           else: {best_acc, best_cfg, rows ++ [row]}
 
       {:error, reason} ->
+        broadcast(state.id, %{
+          type: "strategy_detail", exp: i,
+          input_config: best_cfg, input_history: "",
+          raw_output: "", description: "Error: #{reason}", output_config: nil
+        })
         row = make_row(i, %{accuracy: 0, correct: 0, total: 0, cost: 0}, 0, "crash", "Error: #{reason}")
         broadcast(state.id, %{type: "result", result: row})
         {best_acc, best_cfg, rows ++ [row]}
@@ -119,6 +129,13 @@ defmodule Trinity.EvolveLab do
       |> Task.async_stream(
         fn problem ->
           r = eval_one(state.target, config, problem)
+          if r.error do
+            broadcast(state.id, %{
+              type: "eval_error", exp: exp_num,
+              question: String.slice(problem["question"] || "", 0, 120),
+              error: r.error
+            })
+          end
           :counters.add(counter, 1, 1)
           if r.correct, do: :counters.add(counter, 2, 1)
           completed = :counters.get(counter, 1)
@@ -150,6 +167,14 @@ defmodule Trinity.EvolveLab do
               output_tokens: acc.output_tokens + r.output_tokens
           }
 
+        {:exit, reason}, acc ->
+          broadcast(state.id, %{
+            type: "eval_error", exp: exp_num,
+            question: "(task exited)",
+            error: inspect(reason)
+          })
+          %{acc | total: acc.total + 1}
+
         _, acc ->
           %{acc | total: acc.total + 1}
       end)
@@ -166,15 +191,15 @@ defmodule Trinity.EvolveLab do
       {:ok, %{content: reply, input_tokens: inp, output_tokens: out}} ->
         predicted = extract_number(reply)
         correct = check_answer(predicted, problem["answer"])
-        %{correct: correct, input_tokens: inp, output_tokens: out}
+        %{correct: correct, input_tokens: inp, output_tokens: out, error: nil}
 
-      {:error, _} ->
-        %{correct: false, input_tokens: 0, output_tokens: 0}
+      {:error, reason} ->
+        %{correct: false, input_tokens: 0, output_tokens: 0, error: to_string(reason)}
     end
   rescue
     e ->
       Logger.warning("eval_one error: #{Exception.message(e)}")
-      %{correct: false, input_tokens: 0, output_tokens: 0}
+      %{correct: false, input_tokens: 0, output_tokens: 0, error: Exception.message(e)}
   end
 
   # ── Strategy model ─────────────────────────────────────
@@ -202,7 +227,10 @@ defmodule Trinity.EvolveLab do
 
     case call_llm(strategy, messages, opts) do
       {:ok, %{content: content}} ->
-        parse_json(content)
+        case parse_json(content) do
+          {:ok, map} -> {:ok, map, %{history: history, raw_output: content}}
+          {:error, _} = err -> err
+        end
 
       {:error, reason} ->
         {:error, reason}
