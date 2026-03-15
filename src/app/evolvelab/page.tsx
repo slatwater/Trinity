@@ -12,6 +12,7 @@ import {
   type StrategyDetail,
   type ErrorEntry,
   type HistoryEntry,
+  type JudgeDetail,
   type Phase,
 } from "@/stores/evolvelab";
 
@@ -38,7 +39,7 @@ export default function EvolveLabPage() {
   const {
     strategy, target, numExperiments, maxConcurrency, phase, currentExp,
     progress, results, bestAccuracy, bestConfig, currentSuggestion,
-    error, strategyDetails, errors, history, viewingHistory,
+    error, strategyDetails, errors, judgeDetails, history, viewingHistory,
     selectedTemplateId, setTemplate,
     setStrategy, setTarget, setJudge, judge,
     targetSystemPrompt, targetFormatInstruction, judgePrompt, strategyHint,
@@ -127,30 +128,18 @@ export default function EvolveLabPage() {
             >
               EvolveLab
             </h1>
-            <p
-              style={{
-                fontSize: 14,
-                color: "var(--text-muted)",
-                marginTop: 10,
-                fontFamily: "var(--font-sans)",
-              }}
-            >
-              Autonomous prompt evolution — let one AI optimize another AI&apos;s prompt
-            </p>
           </div>
-        </div>
 
-        {/* Divider */}
-        <div
-          style={{
-            height: 1,
-            background: "var(--border-subtle)",
-            margin: "28px 0 32px",
-            position: "relative",
-            overflow: "hidden",
-          }}
-        >
-          <div style={{ animation: "lineGrow 1.2s 0.3s both", height: "100%" }} />
+          {/* Divider */}
+          <div className="relative" style={{ marginTop: 32, height: 1 }}>
+            <div
+              className="absolute left-0 top-0 h-px"
+              style={{
+                background: "linear-gradient(90deg, var(--accent), var(--accent-border) 40%, var(--divider-end) 70%)",
+                animation: "lineGrow 1.2s cubic-bezier(0.16,1,0.3,1) both",
+              }}
+            />
+          </div>
         </div>
 
         {/* Template Selector */}
@@ -505,14 +494,16 @@ export default function EvolveLabPage() {
                 borderBottom: "1px solid var(--border-subtle)",
               }}
             >
-              {["experiments", "prompt", "data", "strategy", "errors"].map((tab) => {
-                const label = {
+              {["experiments", "prompt", "data", "strategy", ...(showJudge || judgeDetails.length > 0 ? ["judge"] : []), "errors"].map((tab) => {
+                const label: Record<string, string> = {
                   experiments: "Experiments",
                   prompt: "Best Prompt",
                   data: "Data",
                   strategy: "Strategy",
+                  judge: `Judge${judgeDetails.length > 0 ? ` (${judgeDetails.length})` : ""}`,
                   errors: `Errors${errors.length > 0 ? ` (${errors.length})` : ""}`,
-                }[tab]!;
+                };
+                const tabLabel = label[tab]!;
                 return (
                   <button
                     key={tab}
@@ -537,7 +528,7 @@ export default function EvolveLabPage() {
                       transition: "all 0.2s",
                     }}
                   >
-                    {label}
+                    {tabLabel}
                   </button>
                 );
               })}
@@ -728,6 +719,10 @@ export default function EvolveLabPage() {
 
             {activeTab === "strategy" && (
               <StrategyPanel details={strategyDetails} results={results} focusedExp={focusedStrategyExp} onFocusClear={() => setFocusedStrategyExp(null)} />
+            )}
+
+            {activeTab === "judge" && (
+              <JudgePanel judgeDetails={judgeDetails} scoreMax={selectedTemplate.scoreMax} />
             )}
 
             {activeTab === "errors" && (
@@ -1325,7 +1320,7 @@ function FewShotItem({ q, a, type }: { q: string; a?: string; type: "add" | "del
         background: colors.bg, borderLeft: `2px solid ${colors.border}`,
         textDecoration: type === "del" ? "line-through" : "none",
       }}
-      onClick={() => a && setOpen(!open)}
+      onClick={(e) => { if (a) { e.stopPropagation(); setOpen(!open); } }}
     >
       <div style={{ color: colors.text, display: "flex", alignItems: "baseline", gap: 4 }}>
         {colors.prefix && <span>{colors.prefix}</span>}
@@ -1595,6 +1590,170 @@ function ErrorsPanel({ errors }: { errors: ErrorEntry[] }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── JudgePanel ─────────────────────────────────────────
+
+function JudgePanel({ judgeDetails, scoreMax }: { judgeDetails: JudgeDetail[]; scoreMax: number }) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [showRaw, setShowRaw] = useState<Set<number>>(new Set());
+
+  if (judgeDetails.length === 0) {
+    return (
+      <div style={{ ...cardBase, color: "var(--text-muted)", textAlign: "center" }}>
+        No judge data yet.
+      </div>
+    );
+  }
+
+  const grouped = new Map<number, { idx: number; d: JudgeDetail }[]>();
+  for (let i = 0; i < judgeDetails.length; i++) {
+    const d = judgeDetails[i];
+    const list = grouped.get(d.exp) || [];
+    list.push({ idx: i, d });
+    grouped.set(d.exp, list);
+  }
+
+  // Sort within each group: low score first
+  for (const [, items] of grouped) {
+    items.sort((a, b) => a.d.score - b.d.score);
+  }
+
+  const dimColor = (v: number) => {
+    if (v >= scoreMax * 0.8) return "var(--success)";
+    if (v >= scoreMax * 0.5) return "var(--text-muted)";
+    return "var(--error)";
+  };
+
+  const toggleRaw = (idx: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowRaw((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {Array.from(grouped.entries()).map(([exp, items]) => {
+        const avgScore = items.reduce((s, it) => s + it.d.score, 0) / items.length;
+        return (
+          <div key={exp} style={{ ...cardBase, padding: "14px 18px" }}>
+            <div style={{
+              fontSize: 12, fontWeight: 600, color: "var(--text-primary)", marginBottom: 12,
+              display: "flex", alignItems: "center", gap: 10,
+            }}>
+              <span>Exp {exp}</span>
+              <span style={{
+                fontSize: 10, padding: "2px 8px", borderRadius: 4,
+                background: "var(--bg-tertiary)", color: "var(--text-secondary)",
+              }}>
+                {items.length} items · avg {avgScore.toFixed(1)}/{scoreMax}
+              </span>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {items.map(({ idx, d }) => {
+                const isOpen = expandedIdx === idx;
+                const isLow = d.score < scoreMax * 0.5;
+
+                return (
+                  <div key={idx} style={{
+                    borderRadius: 8, overflow: "hidden",
+                    border: `1px solid ${isLow ? "rgba(239,68,68,0.25)" : "var(--border-subtle)"}`,
+                    background: isLow ? "rgba(239,68,68,0.03)" : "var(--bg-tertiary)",
+                  }}>
+                    {/* Card title */}
+                    <div
+                      onClick={() => setExpandedIdx(isOpen ? null : idx)}
+                      style={{
+                        padding: "8px 12px", cursor: "pointer",
+                        display: "flex", alignItems: "center", gap: 8,
+                      }}
+                    >
+                      <span style={{
+                        fontSize: 10, transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+                        transition: "transform 0.2s", color: "var(--text-muted)",
+                      }}>&#9654;</span>
+                      <span style={{
+                        fontSize: 11, fontWeight: 600, color: "var(--text-primary)",
+                        fontFamily: "var(--font-mono)",
+                      }}>
+                        {d.score.toFixed(1)}/{scoreMax}
+                      </span>
+                      <div style={{ display: "flex", gap: 4, flex: 1, flexWrap: "wrap" }}>
+                        {Object.entries(d.dimensions).sort().map(([k, v]) => (
+                          <span key={k} style={{
+                            fontSize: 9, padding: "1px 5px", borderRadius: 3,
+                            background: "var(--bg-secondary)", color: dimColor(v),
+                            fontFamily: "var(--font-mono)", fontWeight: 600,
+                          }}>
+                            {k}:{v}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* First expand: reasoning + dimensions */}
+                    {isOpen && (
+                      <div style={{ padding: "0 12px 12px 12px" }}>
+                        {d.reasoning ? (
+                          <pre style={{ ...preStyle, maxHeight: 200, marginBottom: 10 }}>
+                            {d.reasoning}
+                          </pre>
+                        ) : (
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>
+                            No reasoning output.
+                          </div>
+                        )}
+
+                        {/* Second expand toggle */}
+                        <div
+                          onClick={(e) => toggleRaw(idx, e)}
+                          style={{
+                            fontSize: 10, color: "var(--accent)", cursor: "pointer",
+                            fontFamily: "var(--font-mono)", userSelect: "none",
+                            display: "flex", alignItems: "center", gap: 4,
+                          }}
+                        >
+                          <span style={{
+                            transform: showRaw.has(idx) ? "rotate(90deg)" : "rotate(0deg)",
+                            transition: "transform 0.2s", display: "inline-block",
+                          }}>&#9654;</span>
+                          查看原始数据
+                        </div>
+
+                        {showRaw.has(idx) && (
+                          <div style={{
+                            marginTop: 8, display: "flex", flexDirection: "column", gap: 8,
+                          }}>
+                            <div>
+                              <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>问题</div>
+                              <pre style={{ ...preStyle, maxHeight: 120 }}>{d.question}</pre>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>评判要点</div>
+                              <pre style={{ ...preStyle, maxHeight: 120 }}>{d.reference}</pre>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>被测模型回复</div>
+                              <pre style={{ ...preStyle, maxHeight: 200 }}>{d.reply}</pre>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1965,56 +2124,57 @@ function DatasetModal({ name, items, onClose }: { name: string; items: { questio
 
 function buildStrategyPrompt(checkMode: string, hint: string, scoreMax: number): string {
   if (checkMode === "llm_judge") {
-    return `你是一位提示词工程专家，正在优化${hint}。
+    return `你正在优化${hint}。
 
-被测模型的回复将由裁判模型从四个维度综合打 1-${scoreMax} 分：
-1. 同理心（25%）：是否理解客户情绪、表达关怀
-2. 方案质量（25%）：方案是否具体、可行、步骤清晰
-3. 要点覆盖（25%）：是否覆盖评判要点中的关键内容
-4. 专业度（25%）：流程是否准确、用语是否规范
+裁判模型会从四个维度分别打 1-${scoreMax} 分：
+empathy（同理心）、solution（方案质量）、coverage（要点覆盖）、professionalism（专业度）。
+实验历史中包含每轮的各维度平均分。
 
-你的目标是提高平均得分。请根据实验历史中的得分变化，判断哪个维度最薄弱，针对性优化。
+分析步骤：
+1. 对比各轮实验的维度分数，找到得分最低或提升最慢的维度
+2. 判断当前 prompt 在该维度上的不足
+3. 做一个针对性修改来提升该维度
 
 请返回一个 JSON 对象（不要 markdown，不要代码块，只要纯 JSON）：
 {
   "system_prompt": "...",
   "few_shot_examples": [["用户问题", "理想回复"], ...],
   "format_instruction": "...",
-  "description": "一句话总结本次修改"
+  "description": "一句话总结：针对哪个维度、做了什么调整"
 }
 
 规则：
 - few_shot_examples：0-5 条，每条是 [问题, 理想回复]。
-- 示例回复应展示理想的回复风格和要点覆盖。
-- 每次实验只做一个有意义的修改，便于隔离效果。
-- 尝试不同风格：语气变化、结构调整、增加共情表达、添加后续跟进等。
+- 示例回复应展示该维度的理想表现。
+- 每次实验只改一个维度方向，便于隔离效果。
 - 如果连续几次尝试都没有提升，请尝试完全不同的方向。`;
   }
-
-  const scoreNote = "Responses are checked for exact correctness. Optimize for higher accuracy.";
 
   const domainRules = checkMode === "numeric"
     ? "- The response in few-shot should demonstrate clear step-by-step reasoning ending with #### <number>."
     : "- The response in few-shot should demonstrate the expected answer format.";
 
-  return `You are a prompt engineering expert optimizing ${hint}.
+  return `You are optimizing ${hint}. Responses are checked for exact correctness.
 
-${scoreNote}
+Analysis steps:
+1. Review experiment history — identify which changes improved accuracy and which didn't
+2. Form a hypothesis about what's causing errors
+3. Make one targeted change to test your hypothesis
 
 Respond with a JSON object (no markdown, no code fences, pure JSON only):
 {
   "system_prompt": "...",
   "few_shot_examples": [["question", "ideal_response"], ...],
   "format_instruction": "...",
-  "description": "one-line summary of the change"
+  "description": "one-line summary: what you changed and why"
 }
 
 Rules:
 - few_shot_examples: 0-5 items, each is [question_string, response_string].
 ${domainRules}
 - Try ONE meaningful change per experiment to isolate what helps.
-- Be creative: different styles, roles, verification steps, output formats.
-- If several attempts failed, try something radically different.`;
+- Be creative: different reasoning strategies, verification steps, output formats.
+- If several attempts showed no improvement, try a radically different approach.`;
 }
 
 function configToCode(config: PromptConfig): string {

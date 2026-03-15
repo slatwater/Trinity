@@ -10,6 +10,7 @@ export interface ExperimentResult {
   time_s: number;
   status: "keep" | "discard" | "crash";
   description: string;
+  dimensions?: Record<string, number>;
 }
 
 export interface PromptConfig {
@@ -30,6 +31,7 @@ export interface HistoryEntry {
   bestConfig: PromptConfig | null;
   strategyDetails: StrategyDetail[];
   errors: ErrorEntry[];
+  judgeDetails: JudgeDetail[];
 }
 
 export interface StrategyDetail {
@@ -45,6 +47,16 @@ export interface ErrorEntry {
   exp: number;
   question: string;
   error: string;
+}
+
+export interface JudgeDetail {
+  exp: number;
+  question: string;
+  reference: string;
+  reply: string;
+  reasoning: string;
+  dimensions: Record<string, number>;
+  score: number;
 }
 
 export interface EvalTemplate {
@@ -70,7 +82,7 @@ export const EVAL_TEMPLATES: EvalTemplate[] = [
     scoreMax: 1,
     strategyHint: "a math-solving prompt for GSM8K grade school math problems",
     defaultConfig: {
-      system_prompt: "You are a helpful math tutor. Solve the problem step by step.",
+      system_prompt: "Read the problem carefully and identify what is being asked.\nSolve step by step — after each calculation, verify the arithmetic before moving on.\nWhen finished, re-read the original question to confirm your answer addresses it correctly.",
       few_shot_examples: [],
       format_instruction: "Show your work, then give the final answer as: #### <number>",
     },
@@ -81,32 +93,28 @@ export const EVAL_TEMPLATES: EvalTemplate[] = [
     description: "",
     dataset: "customer_service.jsonl",
     checkMode: "llm_judge",
-    judgePrompt: `你是客服质检评分员。请从以下四个维度综合评估回复质量，输出一个总分（1-5）。
+    judgePrompt: `请从四个维度分别评估客服回复质量，每个维度独立打 1-5 分。
 
-评估维度（各占 25%）：
-1. 同理心：是否理解客户情绪、表达关怀和歉意
-2. 方案质量：解决方案是否具体、可行、步骤清晰
-3. 要点覆盖：是否覆盖评判要点中列出的关键内容，有无重要遗漏
-4. 专业度：流程是否准确、用语是否规范得体
+维度定义：
+- empathy（同理心）：是否理解客户情绪、表达关怀和歉意
+- solution（方案质量）：解决方案是否具体、可行、步骤清晰
+- coverage（要点覆盖）：是否覆盖评判要点中列出的关键内容
+- professionalism（专业度）：流程是否准确、用语是否规范得体
 
-评分标准：
-- 5分：四个维度均表现优秀
-- 4分：大部分维度表现良好，个别有小瑕疵
-- 3分：部分维度有明显不足
-- 2分：多个维度表现差
-- 1分：答非所问或态度恶劣
+评分锚点：5=优秀 4=良好 3=有明显不足 2=差 1=完全不合格
 
 用户问题：{question}
 评判要点：{answer}
 实际回复：{reply}
 
-只输出一个数字分数（1-5），格式：#### 数字`,
+请先逐维度简要说明评分理由（每个维度一句话），然后在最后一行按格式输出分数：
+#### empathy:分数,solution:分数,coverage:分数,professionalism:分数`,
     scoreMax: 5,
     strategyHint: "电商客服回复场景的提示词优化",
     defaultConfig: {
-      system_prompt: "你是一位专业的电商客服代表。请用友好、专业的语气回复客户问题。",
+      system_prompt: "收到客户问题后，按以下步骤组织回复：\n1. 先确认客户的问题和情绪，用一句话表达理解（不要套话）\n2. 给出具体的解决方案，包含可操作的步骤\n3. 如有需要，主动说明后续跟进方式或预防建议",
       few_shot_examples: [],
-      format_instruction: "回复要求：1. 表达对客户的理解和同理心 2. 给出具体、可行的解决方案和操作步骤 3. 确保覆盖问题涉及的所有关键点 4. 用语规范专业",
+      format_instruction: "直接回复客户，不要输出分析过程。语气专业但自然，避免模板化表达。",
     },
   },
 ];
@@ -179,6 +187,7 @@ interface EvolveLabState {
   error: string | null;
   strategyDetails: StrategyDetail[];
   errors: ErrorEntry[];
+  judgeDetails: JudgeDetail[];
 
   // History
   history: HistoryEntry[];
@@ -258,6 +267,19 @@ function handleEvent(event: Record<string, unknown>) {
       setState({ errors: [...getState().errors, err] });
       break;
     }
+    case "judge_detail": {
+      const jd: JudgeDetail = {
+        exp: event.exp as number,
+        question: event.question as string,
+        reference: event.reference as string,
+        reply: event.reply as string,
+        reasoning: event.reasoning as string,
+        dimensions: event.dimensions as Record<string, number>,
+        score: event.score as number,
+      };
+      setState({ judgeDetails: [...getState().judgeDetails, jd] });
+      break;
+    }
     case "done": {
       const ba = event.best_accuracy as number;
       const bc = event.best_config as PromptConfig;
@@ -280,6 +302,7 @@ function handleEvent(event: Record<string, unknown>) {
           bestConfig: bc,
           strategyDetails: getState().strategyDetails,
           errors: getState().errors,
+          judgeDetails: getState().judgeDetails,
         };
         setState({ history: [entry, ...getState().history] });
         fetch("/api/evolvelab/history", {
@@ -442,6 +465,7 @@ export const useEvolveLabStore = create<EvolveLabState>((set, get) => {
     error: null,
     strategyDetails: [],
     errors: [],
+    judgeDetails: [],
 
     history: [],
     viewingHistory: null,
@@ -463,10 +487,19 @@ export const useEvolveLabStore = create<EvolveLabState>((set, get) => {
     setMaxConcurrency: (n) => set({ maxConcurrency: n }),
 
     startExperiment: () => {
-      const { strategy, target, judge, numExperiments, maxConcurrency, selectedTemplateId } = get();
+      const { phase: currentPhase, strategy, target, judge, numExperiments, maxConcurrency, selectedTemplateId, experimentId } = get();
+      if (currentPhase !== "idle" && currentPhase !== "done" && currentPhase !== "error") return;
+
       const template = EVAL_TEMPLATES.find(t => t.id === selectedTemplateId) || EVAL_TEMPLATES[0];
       const strategyReady = strategy.provider === "sdk" || !!strategy.apiKey;
       if (!strategyReady || !target.apiKey) return;
+
+      // Cancel any lingering SSE / backend experiment
+      abortController?.abort();
+      abortController = null;
+      if (experimentId) {
+        fetch(`/api/evolvelab/${experimentId}`, { method: "DELETE" }).catch(() => {});
+      }
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ strategy, target, judge }));
 
@@ -479,7 +512,9 @@ export const useEvolveLabStore = create<EvolveLabState>((set, get) => {
         currentSuggestion: null,
         strategyDetails: [],
         errors: [],
+        judgeDetails: [],
         viewingHistory: null,
+        experimentId: null,
       });
 
       runSSE(strategy, target, judge, numExperiments, maxConcurrency, template);
@@ -512,6 +547,7 @@ export const useEvolveLabStore = create<EvolveLabState>((set, get) => {
         bestConfig: entry.bestConfig,
         strategyDetails: entry.strategyDetails || [],
         errors: entry.errors || [],
+        judgeDetails: entry.judgeDetails || [],
         phase: "done",
       });
     },
@@ -524,6 +560,7 @@ export const useEvolveLabStore = create<EvolveLabState>((set, get) => {
         bestConfig: null,
         strategyDetails: [],
         errors: [],
+        judgeDetails: [],
         phase: "idle",
       });
     },

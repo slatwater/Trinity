@@ -25,7 +25,7 @@ src/
 ├── app/
 │   ├── page.tsx                  # Code 首页（项目仪表盘 + Auto Pilot 入口）
 │   ├── config/page.tsx           # Config 页（全局+项目配置树 + 编辑器）
-│   ├── evolvelab/page.tsx         # EvolveLab 页（实验/策略详情/错误/数据 多标签）
+│   ├── evolvelab/page.tsx         # EvolveLab 页（实验/策略/裁判/错误/数据 多标签）
 │   ├── news/page.tsx             # News 页（推特新闻摘要 × 3 分类）
 │   ├── project/[id]/page.tsx     # 项目聊天页
 │   ├── api/evolvelab/route.ts    # EvolveLab SSE 流式代理
@@ -48,7 +48,7 @@ src/
 │   └── types.ts                  # 类型定义
 └── stores/
     ├── chat.ts                   # 聊天状态管理
-    └── evolvelab.ts              # EvolveLab 状态管理（SSE + 历史 + 策略详情 + 错误）
+    └── evolvelab.ts              # EvolveLab 状态管理（SSE + 历史 + 策略详情 + 裁判详情 + 错误）
 
 backend/
 ├── lib/trinity/
@@ -80,5 +80,5 @@ electron/main.ts + preload.ts     # Electron 主进程 + 预加载
 - CSS 变量主题化 `[data-theme="light"]` + localStorage；Sidebar 68px 上下分区布局
 - ClaudeAgentSDK：`model: "opus"` + `effort: :high` + `preset: :claude_code` + `bypassPermissions`
 - Electron：hiddenInset 标题栏，内嵌 Elixir release + Next.js standalone
-- EvolveLab：多模板评测（GSM8K/客服），三模型架构（策略+被测+裁判），子维度评分，可调并发/提示词
+- EvolveLab：多模板评测（GSM8K/客服），三模型架构（策略+被测+裁判），分维度评分+裁判推理可视化，认知脚手架提示词，可调并发
 - News：Cookie 认证抓推特 → Google 翻译 → Sonnet 4.6 总结，数据存 `~/.trinity/news/`

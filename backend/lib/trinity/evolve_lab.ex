@@ -31,7 +31,7 @@ defmodule Trinity.EvolveLab do
     problems = load_problems(dataset)
 
     default_config = args[:default_config] || %{
-      "system_prompt" => "You are a helpful math tutor. Solve the problem step by step.",
+      "system_prompt" => "Read the problem carefully and identify what is being asked.\nSolve step by step — after each calculation, verify the arithmetic before moving on.\nWhen finished, re-read the original question to confirm your answer addresses it correctly.",
       "few_shot_examples" => [],
       "format_instruction" => "Show your work, then give the final answer as: #### <number>"
     }
@@ -81,8 +81,9 @@ defmodule Trinity.EvolveLab do
     baseline_row = make_row(0, baseline, elapsed, "keep", "baseline")
     broadcast(state.id, %{type: "result", result: baseline_row})
 
+    n = max(state.num_experiments, 1)
     {best_acc, best_cfg, rows} =
-      Enum.reduce(1..state.num_experiments, {baseline.accuracy, state.default_config, [baseline_row]}, fn i, acc ->
+      Enum.reduce(1..n//1, {baseline.accuracy, state.default_config, [baseline_row]}, fn i, acc ->
         experiment_step(state, i, acc)
       end)
 
@@ -147,6 +148,17 @@ defmodule Trinity.EvolveLab do
               error: r.error
             })
           end
+          if is_judge and !r.error do
+            broadcast(state.id, %{
+              type: "judge_detail", exp: exp_num,
+              question: problem["question"] || "",
+              reference: problem["answer"] || "",
+              reply: r.reply,
+              reasoning: r.reasoning,
+              dimensions: r.dimensions,
+              score: Float.round(r.score * state.score_max, 1)
+            })
+          end
           :counters.add(counter, 1, 1)
           # counter 2: for numeric = correct count; for llm_judge = score_sum * 100
           if is_judge do
@@ -179,15 +191,22 @@ defmodule Trinity.EvolveLab do
         timeout: 120_000,
         ordered: false
       )
-      |> Enum.reduce(%{score_sum: 0.0, pass_count: 0, total: 0, input_tokens: 0, output_tokens: 0}, fn
+      |> Enum.reduce(%{score_sum: 0.0, pass_count: 0, total: 0, input_tokens: 0, output_tokens: 0, dim_sums: %{}, dim_count: 0}, fn
         {:ok, r}, acc ->
+          dim_sums = Enum.reduce(r.dimensions, acc.dim_sums, fn {k, v}, ds ->
+            Map.update(ds, k, v, &(&1 + v))
+          end)
+          dim_count = if map_size(r.dimensions) > 0, do: acc.dim_count + 1, else: acc.dim_count
+
           %{
             acc
             | score_sum: acc.score_sum + r.score,
               pass_count: acc.pass_count + if(r.score >= 1.0, do: 1, else: 0),
               total: acc.total + 1,
               input_tokens: acc.input_tokens + r.input_tokens,
-              output_tokens: acc.output_tokens + r.output_tokens
+              output_tokens: acc.output_tokens + r.output_tokens,
+              dim_sums: dim_sums,
+              dim_count: dim_count
           }
 
         {:exit, reason}, acc ->
@@ -213,7 +232,16 @@ defmodule Trinity.EvolveLab do
         "#{agg.pass_count}/#{agg.total}"
     end
 
-    %{accuracy: accuracy, correct: correct_display, cost: cost}
+    dimensions =
+      if agg.dim_count > 0 do
+        Enum.into(agg.dim_sums, %{}, fn {k, sum} ->
+          {k, Float.round(sum / agg.dim_count, 1)}
+        end)
+      else
+        %{}
+      end
+
+    %{accuracy: accuracy, correct: correct_display, cost: cost, dimensions: dimensions}
   end
 
   defp eval_one(state, config, problem) do
@@ -221,16 +249,17 @@ defmodule Trinity.EvolveLab do
 
     case call_llm(state.target, messages, max_tokens: @max_tokens, temperature: @temperature) do
       {:ok, %{content: reply, input_tokens: inp, output_tokens: out}} ->
-        {score, judge_tokens} = evaluate_answer(state, problem, reply)
-        %{score: score, input_tokens: inp + judge_tokens.input, output_tokens: out + judge_tokens.output, error: nil}
+        {score, judge_tokens, dimensions, reasoning} = evaluate_answer(state, problem, reply)
+        %{score: score, dimensions: dimensions, reasoning: reasoning, reply: reply,
+          input_tokens: inp + judge_tokens.input, output_tokens: out + judge_tokens.output, error: nil}
 
       {:error, reason} ->
-        %{score: 0.0, input_tokens: 0, output_tokens: 0, error: to_string(reason)}
+        %{score: 0.0, dimensions: %{}, reasoning: "", reply: "", input_tokens: 0, output_tokens: 0, error: to_string(reason)}
     end
   rescue
     e ->
       Logger.warning("eval_one error: #{Exception.message(e)}")
-      %{score: 0.0, input_tokens: 0, output_tokens: 0, error: Exception.message(e)}
+      %{score: 0.0, dimensions: %{}, reasoning: "", reply: "", input_tokens: 0, output_tokens: 0, error: Exception.message(e)}
   end
 
   # ── Answer evaluation (mode dispatch) ───────────────────
@@ -238,32 +267,32 @@ defmodule Trinity.EvolveLab do
   defp evaluate_answer(%{check_mode: "numeric"}, problem, reply) do
     predicted = extract_number(reply)
     score = if check_numeric(predicted, problem["answer"]), do: 1.0, else: 0.0
-    {score, %{input: 0, output: 0}}
+    {score, %{input: 0, output: 0}, %{}, ""}
   end
 
   defp evaluate_answer(%{check_mode: "exact"}, problem, reply) do
     score = if String.trim(reply) == String.trim(problem["answer"] || ""), do: 1.0, else: 0.0
-    {score, %{input: 0, output: 0}}
+    {score, %{input: 0, output: 0}, %{}, ""}
   end
 
   defp evaluate_answer(%{check_mode: "llm_judge"} = state, problem, reply) do
     judge_prompt = build_judge_prompt(state, problem, reply)
     judge_model = state.judge || state.strategy
 
-    case call_llm(judge_model, [%{"role" => "user", "content" => judge_prompt}], max_tokens: 64, temperature: 0) do
+    case call_llm(judge_model, [%{"role" => "user", "content" => judge_prompt}], max_tokens: 300, temperature: 0) do
       {:ok, %{content: judge_reply, input_tokens: inp, output_tokens: out}} ->
-        raw_score = extract_judge_score(judge_reply, state.score_max)
-        {raw_score / state.score_max, %{input: inp, output: out}}
+        {raw_score, dimensions, reasoning} = extract_judge_result(judge_reply, state.score_max)
+        {raw_score / state.score_max, %{input: inp, output: out}, dimensions, reasoning}
 
       {:error, _} ->
-        {0.0, %{input: 0, output: 0}}
+        {0.0, %{input: 0, output: 0}, %{}, ""}
     end
   end
 
   defp evaluate_answer(_state, problem, reply) do
     predicted = extract_number(reply)
     score = if check_numeric(predicted, problem["answer"]), do: 1.0, else: 0.0
-    {score, %{input: 0, output: 0}}
+    {score, %{input: 0, output: 0}, %{}, ""}
   end
 
   defp build_judge_prompt(state, problem, reply) do
@@ -273,14 +302,42 @@ defmodule Trinity.EvolveLab do
     |> String.replace("{reply}", reply)
   end
 
-  defp extract_judge_score(text, max_score) do
-    case extract_number(text) do
-      nil -> 0.0
-      num_str ->
-        case Float.parse(num_str) do
-          {n, _} when n >= 1 -> min(n, max_score * 1.0)
-          _ -> 0.0
+  defp extract_judge_result(text, max_score) do
+    reasoning = case Regex.run(~r/^([\s\S]*?)####/m, text) do
+      [_, before] -> String.trim(before)
+      _ -> ""
+    end
+
+    with [_, raw] <- Regex.run(~r/####\s*(.+)/s, text),
+         parts <- String.split(raw, ",", trim: true),
+         parsed <- Enum.map(parts, &parse_dimension_score/1),
+         parsed <- Enum.reject(parsed, &is_nil/1),
+         true <- length(parsed) > 1 do
+      dimensions = Map.new(parsed)
+      values = Map.values(dimensions)
+      avg = Enum.sum(values) / length(values)
+      {min(avg, max_score * 1.0), dimensions, reasoning}
+    else
+      _ ->
+        case extract_number(text) do
+          nil -> {0.0, %{}, reasoning}
+          num_str ->
+            case Float.parse(num_str) do
+              {n, _} when n >= 1 -> {min(n, max_score * 1.0), %{}, reasoning}
+              _ -> {0.0, %{}, reasoning}
+            end
         end
+    end
+  end
+
+  defp parse_dimension_score(part) do
+    case String.split(String.trim(part), ":", parts: 2) do
+      [key, val] ->
+        case Float.parse(String.trim(val)) do
+          {n, _} -> {String.trim(key), n}
+          :error -> nil
+        end
+      _ -> nil
     end
   end
 
@@ -291,7 +348,14 @@ defmodule Trinity.EvolveLab do
       results
       |> Enum.map(fn r ->
         acc_pct = Float.round(r.accuracy * 100, 1)
-        "- Exp #{r.exp}: accuracy=#{acc_pct}% (#{r.status}) — #{r.description}"
+        base = "- Exp #{r.exp}: accuracy=#{acc_pct}% (#{r.status}) — #{r.description}"
+        dims = r[:dimensions] || %{}
+        if map_size(dims) > 0 do
+          dim_str = dims |> Enum.sort() |> Enum.map(fn {k, v} -> "#{k}=#{v}" end) |> Enum.join(", ")
+          "#{base}\n  [#{dim_str}]"
+        else
+          base
+        end
       end)
       |> Enum.join("\n")
 
@@ -323,29 +387,29 @@ defmodule Trinity.EvolveLab do
 
   defp strategy_system_prompt(%{check_mode: "llm_judge"} = state) do
     """
-    你是一位提示词工程专家，正在优化#{state.strategy_hint}。
+    你正在优化#{state.strategy_hint}。
 
-    被测模型的回复将由裁判模型从四个维度综合打 1-#{state.score_max} 分：
-    1. 同理心（25%）：是否理解客户情绪、表达关怀
-    2. 方案质量（25%）：方案是否具体、可行、步骤清晰
-    3. 要点覆盖（25%）：是否覆盖评判要点中的关键内容
-    4. 专业度（25%）：流程是否准确、用语是否规范
+    裁判模型会从四个维度分别打 1-#{state.score_max} 分：
+    empathy（同理心）、solution（方案质量）、coverage（要点覆盖）、professionalism（专业度）。
+    实验历史中包含每轮的各维度平均分。
 
-    你的目标是提高平均得分。请根据实验历史中的得分变化，判断哪个维度最薄弱，针对性优化。
+    分析步骤：
+    1. 对比各轮实验的维度分数，找到得分最低或提升最慢的维度
+    2. 判断当前 prompt 在该维度上的不足
+    3. 做一个针对性修改来提升该维度
 
     请返回一个 JSON 对象（不要 markdown，不要代码块，只要纯 JSON）：
     {
       "system_prompt": "...",
       "few_shot_examples": [["用户问题", "理想回复"], ...],
       "format_instruction": "...",
-      "description": "一句话总结本次修改"
+      "description": "一句话总结：针对哪个维度、做了什么调整"
     }
 
     规则：
     - few_shot_examples：0-5 条，每条是 [问题, 理想回复]。
-    - 示例回复应展示理想的回复风格和要点覆盖。
-    - 每次实验只做一个有意义的修改，便于隔离效果。
-    - 尝试不同风格：语气变化、结构调整、增加共情表达、添加后续跟进等。
+    - 示例回复应展示该维度的理想表现。
+    - 每次实验只改一个维度方向，便于隔离效果。
     - 如果连续几次尝试都没有提升，请尝试完全不同的方向。
     """
   end
@@ -359,24 +423,27 @@ defmodule Trinity.EvolveLab do
     end
 
     """
-    You are a prompt engineering expert optimizing #{state.strategy_hint}.
+    You are optimizing #{state.strategy_hint}. Responses are checked for exact correctness.
 
-    Responses are checked for exact correctness. Optimize for higher accuracy.
+    Analysis steps:
+    1. Review experiment history — identify which changes improved accuracy and which didn't
+    2. Form a hypothesis about what's causing errors
+    3. Make one targeted change to test your hypothesis
 
     Respond with a JSON object (no markdown, no code fences, pure JSON only):
     {
       "system_prompt": "...",
       "few_shot_examples": [["question", "ideal_response"], ...],
       "format_instruction": "...",
-      "description": "one-line summary of the change"
+      "description": "one-line summary: what you changed and why"
     }
 
     Rules:
     - few_shot_examples: 0-5 items, each is [question_string, response_string].
     #{domain_rules}
     - Try ONE meaningful change per experiment to isolate what helps.
-    - Be creative: different styles, roles, verification steps, output formats.
-    - If several attempts failed, try something radically different.
+    - Be creative: different reasoning strategies, verification steps, output formats.
+    - If several attempts showed no improvement, try a radically different approach.
     """
   end
 
@@ -630,7 +697,8 @@ defmodule Trinity.EvolveLab do
       cost: Float.round(result.cost + 0.0, 6),
       time_s: Float.round(elapsed + 0.0, 1),
       status: status,
-      description: desc
+      description: desc,
+      dimensions: Map.get(result, :dimensions, %{})
     }
   end
 
